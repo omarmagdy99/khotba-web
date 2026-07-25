@@ -232,17 +232,18 @@
     // ── العرض ────────────────────────────────────────────────
 
     function effective(r) {
-      var d = state.dirty[r.mosqueId];
+      var d = state.dirty[r.mosqueId] || state.dirty[String(r.mosqueId)];
       return d ? { khatibId: d.khatibId, status: d.status } : { khatibId: r.khatibId, status: r.status };
     }
 
     /** الخطباء المحجوزين في مساجد تانية نفس التاريخ. */
     function bookedMap(exceptMosqueId) {
       var m = {};
+      var exStr = String(exceptMosqueId || '');
       state.rows.forEach(function (r) {
-        if (r.mosqueId === exceptMosqueId) return;
+        if (String(r.mosqueId) === exStr) return;
         var e = effective(r);
-        if (e.khatibId) m[e.khatibId] = r.mosqueId;
+        if (e.khatibId) m[String(e.khatibId)] = String(r.mosqueId);
       });
       return m;
     }
@@ -254,7 +255,7 @@
       var visible = state.rows.filter(function (r) {
         if (state.filterEmpty && effective(r).khatibId) return false;
         if (state.search) {
-          var m = state.mosques[r.mosqueId] || {};
+          var m = state.mosques[r.mosqueId] || state.mosques[String(r.mosqueId)] || {};
           if (!matches(m.name, state.search) && !matches(m.mujawra, state.search)) return false;
         }
         return true;
@@ -288,9 +289,9 @@
     }
 
     function rowHtml(r) {
-      var m = state.mosques[r.mosqueId] || {};
+      var m = state.mosques[r.mosqueId] || state.mosques[String(r.mosqueId)] || {};
       var e = effective(r);
-      var cls = 'table-row' + (state.dirty[r.mosqueId] ? ' dirty' : '') + (!e.khatibId ? ' empty-slot' : '');
+      var cls = 'table-row' + (state.dirty[r.mosqueId] || state.dirty[String(r.mosqueId)] ? ' dirty' : '') + (!e.khatibId ? ' empty-slot' : '');
       return '<div class="' + cls + '" data-mosque="' + esc(r.mosqueId) + '">' +
         '<div data-label="المسجد">' + esc(m.name || r.mosque) + '</div>' +
         '<div data-label="المجاورة"><span class="area-badge">' + esc(m.mujawra || '—') + '</span></div>' +
@@ -299,20 +300,11 @@
         '</div>';
     }
 
-    /**
-     * الترتيب: الخطيب الثابت، ثم من اختار المسجد ده في تفضيلاته، ثم المتاحين،
-     * وأخيرًا المحجوزين — بيظهروا رمادي ومكتوب محجوزين فين، مش متشالين،
-     * عشان الموظف يفهم ليه مش عارف ياخد الشخص ده.
-     */
-    /**
-     * الترتيب: الخطيب الثابت أولاً، ثم الخطباء الذين اختاروا هذا المسجد في رغباتهم (مقترح)،
-     * ثم باقي الخطباء المتاحين، وأخيراً الخطباء المسندون إلى مسجد آخر في نفس الجمعة
-     * (يظهرون بالأحمر ومتاح اختيارهم لنقلهم تلقائياً من المسجد السابق).
-     */
     function selectHtml(r, e) {
-      var m = state.mosques[r.mosqueId] || {};
-      var booked = bookedMap(r.mosqueId);
-      var permanent = m.permanentKhatibId || '';
+      var m = state.mosques[r.mosqueId] || state.mosques[String(r.mosqueId)] || {};
+      var booked = bookedMap(String(r.mosqueId));
+      var permanent = String(m.permanentKhatibId || '');
+      var currentKhatibId = String(e.khatibId || '');
 
       var groups = [[], [], [], []];
       state.khatibs.forEach(function (k) {
