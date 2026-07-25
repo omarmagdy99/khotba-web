@@ -137,6 +137,7 @@
     (async function () {
       if (!await requireAuth()) return;
       await loadData();
+      appReady();
     })();
 
     async function loadData() {

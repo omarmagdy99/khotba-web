@@ -55,6 +55,7 @@
       if (!await requireAuth()) return;
       initDefaults();
       await loadKhatibs();
+      appReady();
     })();
 
     function initDefaults() {

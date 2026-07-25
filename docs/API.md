@@ -313,3 +313,26 @@ The audience is roughly 160 people. At a few seconds of script runtime per reque
 consumer-account budget of ~90 minutes per day is not a constraint, and no caching layer is
 planned. If the page is ever shared beyond the khatibs, the mitigation is a `CacheService`
 wrapper on `doGet` keyed by date — a contained change to one function, not a redesign.
+
+### `regenerateDate`
+
+```json
+{ "action": "regenerateDate", "date": "2026-07-31", "mode": "fill" }
+```
+
+Runs against a date that already has rows; returns `NOT_FOUND` otherwise, pointing the caller
+at `generateDate`. Takes the same lock.
+
+| `mode` | Effect |
+| --- | --- |
+| `fill` (default) | Adds rows for mosques created since the date was generated, and fills empty slots from each mosque's permanent khatib. **Touches no existing assignment.** |
+| `reset` | Clears every assignment on the date, then re-applies permanent khatibs only. |
+
+`fill` exists because of a real gap: `generateDate` returns early when rows exist, so a mosque
+added afterwards was silently absent from that date with no way to add it.
+
+A permanent khatib already booked elsewhere on that date is **skipped, not double-booked** —
+the mosque stays empty and its name comes back in `skipped` so the UI can say so rather than
+leaving the gap unexplained.
+
+Returns the schedule plus `{ mode, addedMosques, filled, cleared, skipped }`.

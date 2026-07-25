@@ -57,6 +57,7 @@
     (async function () {
       if (!await requireAuth()) return;
       await loadPublishSettings();
+      appReady();
     })();
 
     async function loadPublishSettings() {

@@ -153,11 +153,13 @@
         state.version = d.version;
         state.rows = d.rows;
 
-        if (!d.exists) { renderGenerate(); return; }
+        if (!d.exists) { renderGenerate(); appReady(); return; }
         await refreshLoadCounts();
         render();
       } catch (e) {
         showError(el('main'), e.message, function () { load(date); });
+      } finally {
+        appReady();
       }
     }
 
@@ -245,6 +247,7 @@
             (emptyCount ? 'متبقي بدون خطيب: ' + emptyCount : 'كل المساجد متوزعة ✓') + '</button>' +
           (state.filterEmpty ? '<button class="btn btn-plain btn-sm" id="allBtn">عرض الكل</button>' : '') +
           '<span style="flex:1"></span>' +
+          '<button class="btn btn-sm btn-plain" id="regenBtn" title="يضيف المساجد الجديدة ويملّي الفاضي بالخطيب الثابت">🔄 إعادة التوليد</button>' +
           '<button class="btn btn-sm btn-plain" id="pdfBtn">📄 استخراج PDF</button>' +
           '<button class="btn btn-sm" id="saveBtn"' + (dirtyCount ? '' : ' disabled') + '>' +
             'حفظ' + (dirtyCount ? ' (' + dirtyCount + ')' : '') + '</button>' +
@@ -331,6 +334,7 @@
 
       el('pdfBtn').onclick = function () { exportPdf(el('pdfArea'), 'توزيع-' + state.date); };
       el('saveBtn').onclick = save;
+      el('regenBtn').onclick = regenerate;
 
       var s = el('mosqueSearch');
       s.oninput = function () {
@@ -360,6 +364,75 @@
           render();
         };
       });
+    }
+
+    // ── إعادة التوليد ────────────────────────────────────────
+
+    /**
+     * وضعان: "استكمال" بيضيف المساجد الجديدة ويملّي الفاضي بالخطيب الثابت
+     * من غير ما يلمس أي توزيع يدوي، و"تصفير" بيمسح التوزيع كله ويرجّع
+     * الثابتين بس. التصفير بيتأكد مرتين لأنه بيضيّع شغل.
+     */
+    function regenerate() {
+      if (Object.keys(state.dirty).length) {
+        toast('احفظ تعديلاتك الأول أو ارجع عنها', 'warn');
+        return;
+      }
+      el('dateNotice').innerHTML =
+        '<div class="notice notice-info"><strong>إعادة توليد ' + esc(formatDate(state.date)) + '</strong>' +
+        '<div style="margin:8px 0;font-size:.92em">' +
+        '<div>• <strong>استكمال</strong> — يضيف المساجد اللي اتعملت بعد التوليد، ويملّي الفاضي بالخطيب الثابت. مش بيغيّر أي توزيع موجود.</div>' +
+        '<div style="margin-top:4px">• <strong>تصفير</strong> — يمسح التوزيع كله ويرجّع الخطباء الثابتين فقط.</div>' +
+        '</div>' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+        '<button class="btn btn-sm" id="regenFill">استكمال</button>' +
+        '<button class="btn btn-sm btn-danger" id="regenReset">تصفير</button>' +
+        '<button class="btn btn-sm btn-plain" id="regenCancel">إلغاء</button>' +
+        '</div></div>';
+
+      el('regenCancel').onclick = function () { el('dateNotice').innerHTML = ''; };
+      el('regenFill').onclick = function () { runRegen('fill'); };
+      el('regenReset').onclick = function () {
+        var filled = state.rows.filter(function (r) { return r.khatibId; }).length;
+        if (!confirmBox('هيتم مسح ' + filled + ' توزيع في ' + formatDate(state.date) +
+                        ' ورجوع الخطباء الثابتين بس.\n\nمتأكد؟')) return;
+        runRegen('reset');
+      };
+    }
+
+    async function runRegen(mode) {
+      el('dateNotice').innerHTML = '<div class="notice notice-info">جاري إعادة التوليد...</div>';
+      try {
+        var d = await api('regenerateDate', { date: state.date, mode: mode });
+        state.rows = d.rows;
+        state.version = d.version;
+        state.dirty = {};
+
+        var parts = [];
+        if (d.cleared) parts.push('اتمسح ' + d.cleared + ' توزيع');
+        if (d.addedMosques.length) parts.push('اتضاف ' + d.addedMosques.length + ' مسجد جديد');
+        if (d.filled) parts.push('اتملى ' + d.filled + ' بالخطيب الثابت');
+        if (!parts.length) parts.push('مفيش حاجة اتغيرت — كل حاجة محدّثة');
+
+        var html = '<div class="notice notice-info">' + esc(parts.join('، '));
+        if (d.addedMosques.length) {
+          html += '<div style="margin-top:6px;font-size:.88em">المساجد المضافة: ' +
+                  esc(d.addedMosques.join('، ')) + '</div>';
+        }
+        // الخطيب الثابت اللي كان محجوز في مسجد تاني — لازم يتقال، مش يتسكت عنه
+        if (d.skipped && d.skipped.length) {
+          html += '<div style="margin-top:6px;font-size:.88em;color:var(--warn)">' +
+                  'خطيبها الثابت كان محجوز في مكان تاني، فسيبناها فاضية: ' +
+                  esc(d.skipped.join('، ')) + '</div>';
+        }
+        html += '</div>';
+        el('dateNotice').innerHTML = html;
+
+        await refreshLoadCounts();
+        render();
+      } catch (e) {
+        el('dateNotice').innerHTML = '<div class="notice notice-err">' + esc(e.message) + '</div>';
+      }
     }
 
     // ── الحفظ ────────────────────────────────────────────────

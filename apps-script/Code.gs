@@ -158,6 +158,7 @@ function route_(b) {
     case 'deactivateKhatib':  return deactivate_('khatibs', b.id, user);
     case 'setPreferences':    return setPreferences_(b.khatibId, b.mosqueIds);
     case 'generateDate':      return generateDate_(b, user);
+    case 'regenerateDate':    return regenerateDate_(b, user);
     case 'saveSchedule':      return saveSchedule_(b, user);
     case 'publishRange':      return publishRange_(b.from, b.to);
     case 'getSettings':       return ok_({ settings: settingsMap_() });
@@ -510,6 +511,107 @@ function generateDate_(b, user) {
     var res = getSchedule_(date);
     res.data.created = rows.length;
     res.data.prefilled = rows.filter(function (r) { return r[3]; }).length;
+    return res;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * إعادة توليد تاريخ موجود بالفعل.
+ *
+ * mode = 'fill'  (الافتراضي، غير مدمّر):
+ *   - بيضيف صفوف للمساجد اللي اتعملت بعد ما التاريخ اتولّد. من غير ده
+ *     المسجد الجديد بيختفي من الجمعة دي تمامًا.
+ *   - بيملّي المساجد الفاضية بخطيبها الثابت، لو مش محجوز في مكان تاني.
+ *   - مبيلمسش أي توزيع اتعمل بالإيد.
+ *
+ * mode = 'reset' (مدمّر):
+ *   - بيمسح كل التوزيع في التاريخ ده ويرجّع الخطباء الثابتين بس.
+ *   - الواجهة بتطلب تأكيد صريح قبله.
+ */
+function regenerateDate_(b, user) {
+  var date = b.date;
+  var mode = b.mode === 'reset' ? 'reset' : 'fill';
+  if (!isIsoDate_(date)) return err_('BAD_REQUEST', 'تاريخ غير صحيح');
+
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(LOCK_MS)) return err_('LOCKED', 'النظام مشغول، حاول بعد لحظات');
+
+  try {
+    var all = readTab_('assignments');
+    var onDate = {}, rowIdx = {}, dateType = 'friday', label = '';
+    all.forEach(function (a, i) {
+      if (a.date !== date) return;
+      onDate[a.mosque_id] = a;
+      rowIdx[a.mosque_id] = i + 2;
+      if (a.date_type) dateType = a.date_type;
+      if (a.label) label = a.label;
+    });
+
+    if (!Object.keys(onDate).length) {
+      return err_('NOT_FOUND', 'التاريخ ده لسه متولّدش — استخدم "توليد الجمعة"');
+    }
+
+    var sh = sheet_('assignments');
+    var now = nowIso_();
+    var kCol = TABS.assignments.indexOf('khatib_id') + 1;
+    var sCol = TABS.assignments.indexOf('status') + 1;
+    var cleared = 0;
+
+    if (mode === 'reset') {
+      for (var mid in onDate) {
+        if (onDate[mid].khatib_id) cleared++;
+        sh.getRange(rowIdx[mid], kCol).setNumberFormat('@').setValue('');
+        sh.getRange(rowIdx[mid], sCol).setValue('unassigned');
+        stamp_(sh, rowIdx[mid], user);
+        onDate[mid].khatib_id = '';
+      }
+    }
+
+    // مين محجوز فعلاً في التاريخ ده دلوقتي
+    var taken = {};
+    for (var m2 in onDate) if (onDate[m2].khatib_id) taken[onDate[m2].khatib_id] = true;
+
+    var mosques = listMosques_(false);
+    var added = [], filled = 0, skipped = [];
+    var newRows = [];
+
+    mosques.forEach(function (m) {
+      var pk = m.permanent_khatib_id || '';
+
+      if (!onDate[m.id]) {
+        var assign = (pk && !taken[pk]) ? pk : '';
+        if (assign) taken[assign] = true;
+        else if (pk) skipped.push(m.name + ' ' + m.mujawra);
+        newRows.push([date + '_' + m.id, date, m.id, assign,
+                      assign ? 'confirmed' : 'unassigned', dateType, label, user.username, now]);
+        added.push(m.name + ' ' + m.mujawra);
+        return;
+      }
+
+      if (!pk || onDate[m.id].khatib_id) return;
+      if (taken[pk]) { skipped.push(m.name + ' ' + m.mujawra); return; }
+
+      sh.getRange(rowIdx[m.id], kCol).setNumberFormat('@').setValue(pk);
+      sh.getRange(rowIdx[m.id], sCol).setValue('confirmed');
+      stamp_(sh, rowIdx[m.id], user);
+      taken[pk] = true;
+      filled++;
+    });
+
+    if (newRows.length) {
+      var start = sh.getLastRow() + 1;
+      sh.getRange(start, 1, newRows.length, TABS.assignments.length).setValues(newRows);
+      applyTextFormat_(sh, 'assignments', start, newRows.length);
+    }
+
+    var res = getSchedule_(date);
+    res.data.mode = mode;
+    res.data.addedMosques = added;
+    res.data.filled = filled;
+    res.data.cleared = cleared;
+    res.data.skipped = skipped;   // خطيب ثابت كان محجوز في مكان تاني
     return res;
   } finally {
     lock.releaseLock();

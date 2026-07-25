@@ -207,6 +207,53 @@ async function exportPdf(node, filename) {
   }
 }
 
+// ─────────────────────────────────────────── شاشة التحميل
+
+/**
+ * غطاء بيتحط فوق الصفحة كلها لحد ما البيانات تجهز وتتعرض.
+ * بينحقن فورًا وقت تحميل السكربت — يعني قبل ما أي محتوى نص ياخد فرصة
+ * يبان، فالمستخدم مايشوفش صفحة نص فاضية وهي بتتملي.
+ *
+ * الصفحة بتنادي appReady() بعد أول رسم فعلي، مش بعد وصول الرد.
+ */
+(function injectAppLoading() {
+  if (document.body && document.body.dataset.noLoader === '1') return;
+
+  var add = function () {
+    if (el('appLoading')) return;
+    var d = document.createElement('div');
+    d.id = 'appLoading';
+    d.className = 'app-loading';
+    d.innerHTML = '<div class="spinner"></div><p>جاري التحميل...</p>';
+    document.body.appendChild(d);
+  };
+
+  if (document.body) add();
+  else document.addEventListener('DOMContentLoaded', add);
+
+  // شبكة أمان: لو صفحة نسيت تنادي appReady، أو حصل خطأ قبلها،
+  // الغطاء بيتشال لوحده بدل ما المستخدم يفضل قاعد قدام دايرة بتلف.
+  setTimeout(function () {
+    var n = el('appLoading');
+    if (n && !n.classList.contains('hide')) {
+      appReady();
+      toast('التحميل أخد وقت أطول من المتوقع', 'warn');
+    }
+  }, 25000);
+})();
+
+function appLoadingText(msg) {
+  var n = el('appLoading');
+  if (n) { var p = n.querySelector('p'); if (p) p.textContent = msg; }
+}
+
+function appReady() {
+  var n = el('appLoading');
+  if (!n) return;
+  n.classList.add('hide');
+  setTimeout(function () { if (n.parentNode) n.parentNode.removeChild(n); }, 250);
+}
+
 // ─────────────────────────────────────────── شريط التنقل
 
 function renderNav(active) {

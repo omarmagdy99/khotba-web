@@ -32,10 +32,17 @@
   <script src="config.js"></script>
   <script src="assets/app.js"></script>
   <script>
-    // لو فيه توكن صالح، عدّي على طول
+    // لو فيه توكن صالح، عدّي على طول. الغطاء بيفضل ظاهر أثناء التحقق
+    // عشان نموذج الدخول ميرفرفش لو المستخدم داخل أصلاً.
     (async function () {
-      if (!getToken()) return;
-      try { await api('whoami'); location.href = 'schedule.html'; } catch (e) { clearToken(); }
+      if (!getToken()) { appReady(); return; }
+      try {
+        await api('whoami');
+        location.href = 'schedule.html';
+      } catch (e) {
+        clearToken();
+        appReady();
+      }
     })();
 
     el('loginForm').addEventListener('submit', async function (ev) {
