@@ -2,12 +2,45 @@
 
 // ─────────────────────────────────────────── الاتصال بالسيرفر
 
+var _CLIENT_CACHE_TTL_MS = 5 * 60 * 1000; // 5 دقائق
+var _CACHEABLE_ACTIONS = ['listKhatibs', 'listMosques', 'getSettings', 'getSchedule', 'getLoadCounts', 'getKhatibSchedule'];
+var _INVALIDATING_ACTIONS = [
+  'createKhatib', 'updateKhatib', 'deactivateKhatib',
+  'createMosque', 'updateMosque', 'deactivateMosque',
+  'setPreferences', 'publishRange', 'saveSchedule', 'generateDate', 'regenerateDate'
+];
+
+function clearClientCache() {
+  try {
+    for (var i = sessionStorage.length - 1; i >= 0; i--) {
+      var k = sessionStorage.key(i);
+      if (k && k.indexOf('awqaf_cache_') === 0) {
+        sessionStorage.removeItem(k);
+      }
+    }
+  } catch (e) {}
+}
+
 /**
  * كل الطلبات POST بـ text/plain وبدون أي header إضافي.
- * ده مقصود: Apps Script مش بيرد على OPTIONS، و application/json
- * بيخلي المتصفح يبعت preflight فالطلب بيفشل خالص. راجع docs/API.md.
+ * مع استخدام التخزين المؤقت الذكي (Client-side Caching) للتنقل الفوري.
  */
 async function api(action, payload) {
+  var isCacheable = _CACHEABLE_ACTIONS.indexOf(action) >= 0;
+  var cacheKey = 'awqaf_cache_' + action + '_' + JSON.stringify(payload || {});
+
+  if (isCacheable) {
+    try {
+      var cachedStr = sessionStorage.getItem(cacheKey);
+      if (cachedStr) {
+        var cached = JSON.parse(cachedStr);
+        if (Date.now() - cached.ts < _CLIENT_CACHE_TTL_MS) {
+          return cached.data;
+        }
+      }
+    } catch (e) {}
+  }
+
   var body = Object.assign({ action: action, token: getToken() }, payload || {});
   var res;
   try {
@@ -24,8 +57,6 @@ async function api(action, payload) {
   try {
     json = await res.json();
   } catch (e) {
-    // Apps Script بيرجّع صفحة HTML لما يحصل خطأ غير ممسوك، والمتصفح
-    // مش بيقدر يقراها. مش مشكلة CORS رغم إنها بتبان كده.
     throw new ApiError('INTERNAL', 'رد غير متوقع من السيرفر. راجع سجل Apps Script.');
   }
 
@@ -33,6 +64,17 @@ async function api(action, payload) {
     if (json.error.code === 'UNAUTHENTICATED') { clearToken(); goLogin(); }
     throw new ApiError(json.error.code, json.error.message, json.error.details);
   }
+
+  if (isCacheable) {
+    try {
+      sessionStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), data: json.data }));
+    } catch (e) {}
+  }
+
+  if (_INVALIDATING_ACTIONS.indexOf(action) >= 0) {
+    clearClientCache();
+  }
+
   return json.data;
 }
 

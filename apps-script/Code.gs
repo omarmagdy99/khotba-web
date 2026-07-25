@@ -154,6 +154,26 @@ var KNOWN_ACTIONS = [
   'generateDate', 'regenerateDate', 'saveSchedule', 'publishRange',
 ];
 
+function getCachedJson_(key, fetchFn, ttlSeconds) {
+  var cache = CacheService.getScriptCache();
+  var cached = cache.get(key);
+  if (cached) {
+    try { return JSON.parse(cached); } catch (e) {}
+  }
+  var data = fetchFn();
+  try {
+    cache.put(key, JSON.stringify(data), ttlSeconds || 600);
+  } catch (e) {}
+  return data;
+}
+
+function invalidateServerCache_() {
+  try {
+    var cache = CacheService.getScriptCache();
+    cache.removeAll(['mosques_inc', 'mosques_act', 'khatibs_inc', 'khatibs_act', 'settings_map']);
+  } catch (e) {}
+}
+
 function route_(b) {
   var a = b.action;
 
@@ -165,24 +185,32 @@ function route_(b) {
 
   switch (a) {
     case 'whoami':            return ok_({ username: user.username, displayName: user.display_name });
-    case 'listMosques':       return ok_({ mosques: listMosques_(b.includeInactive).map(publicMosque_) });
-    case 'listKhatibs':       return ok_({ khatibs: listKhatibs_(b.includeInactive).map(publicKhatib_) });
+    case 'listMosques':       
+      var mKey = 'mosques_' + (b.includeInactive ? 'inc' : 'act');
+      var mRes = getCachedJson_(mKey, function () { return { mosques: listMosques_(b.includeInactive).map(publicMosque_) }; }, 600);
+      return ok_(mRes);
+    case 'listKhatibs':       
+      var kKey = 'khatibs_' + (b.includeInactive ? 'inc' : 'act');
+      var kRes = getCachedJson_(kKey, function () { return { khatibs: listKhatibs_(b.includeInactive).map(publicKhatib_) }; }, 600);
+      return ok_(kRes);
     case 'getSchedule':       return getSchedule_(b.date);
     case 'getKhatibSchedule': return getKhatibSchedule_(b.khatibId, b.from, b.to);
     case 'listDates':         return ok_({ dates: listDates_() });
     case 'getLoadCounts':     return ok_({ counts: loadCounts_(b.from, b.to) });
-    case 'createMosque':      return saveMosque_(b, user, true);
-    case 'updateMosque':      return saveMosque_(b, user, false);
-    case 'deactivateMosque':  return deactivate_('mosques', b.id, user);
-    case 'createKhatib':      return saveKhatib_(b, user, true);
-    case 'updateKhatib':      return saveKhatib_(b, user, false);
-    case 'deactivateKhatib':  return deactivate_('khatibs', b.id, user);
-    case 'setPreferences':    return setPreferences_(b.khatibId, b.mosqueIds);
+    case 'createMosque':      invalidateServerCache_(); return saveMosque_(b, user, true);
+    case 'updateMosque':      invalidateServerCache_(); return saveMosque_(b, user, false);
+    case 'deactivateMosque':  invalidateServerCache_(); return deactivate_('mosques', b.id, user);
+    case 'createKhatib':      invalidateServerCache_(); return saveKhatib_(b, user, true);
+    case 'updateKhatib':      invalidateServerCache_(); return saveKhatib_(b, user, false);
+    case 'deactivateKhatib':  invalidateServerCache_(); return deactivate_('khatibs', b.id, user);
+    case 'setPreferences':    invalidateServerCache_(); return setPreferences_(b.khatibId, b.mosqueIds);
     case 'generateDate':      return generateDate_(b, user);
     case 'regenerateDate':    return regenerateDate_(b, user);
     case 'saveSchedule':      return saveSchedule_(b, user);
-    case 'publishRange':      return publishRange_(b.from, b.to);
-    case 'getSettings':       return ok_({ settings: settingsMap_() });
+    case 'publishRange':      invalidateServerCache_(); return publishRange_(b.from, b.to);
+    case 'getSettings':       
+      var sRes = getCachedJson_('settings_map', function () { return { settings: settingsMap_() }; }, 600);
+      return ok_(sRes);
   }
   // الإجراء موجود في القائمة بس مفيش له case — يعني الكود اتنشر ناقص.
   var hint = KNOWN_ACTIONS.indexOf(a) >= 0

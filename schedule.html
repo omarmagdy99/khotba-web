@@ -4,9 +4,13 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>توزيع الخطب — أوقاف 15 مايو</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.rtl.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/css/tom-select.bootstrap5.min.css">
   <link rel="stylesheet" href="assets/style.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/js/tom-select.complete.min.js"></script>
   <style>
     .table-header, .table-row { grid-template-columns: 1.6fr 1fr 2.2fr 1fr; }
     .friday-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
@@ -73,12 +77,25 @@
     };
 
     (async function () {
-      if (!await requireAuth()) return;
       renderChips();
       var f = nextFridays(1)[0];
       el('dateInput').value = f;
-      await loadReference();
-      await load(f);
+
+      var fs = nextFridays(8);
+      state._window = { from: fs[0], to: fs[fs.length - 1] };
+
+      var authPromise = requireAuth();
+      if (!getToken()) { await authPromise; return; }
+
+      try {
+        await Promise.all([
+          authPromise,
+          loadReference(),
+          load(f)
+        ]);
+      } catch (e) {
+        appReady();
+      }
     })();
 
     // ── اختيار التاريخ ───────────────────────────────────────
@@ -125,19 +142,18 @@
     // ── تحميل ────────────────────────────────────────────────
 
     async function loadReference() {
-      var data = await api('listKhatibs');
+      var res = await Promise.all([api('listKhatibs'), api('listMosques')]);
+      var data = res[0];
+      var m = res[1];
+
       state.khatibs = data.khatibs;
       state.prefsByKhatib = {};
       data.khatibs.forEach(function (k) {
         state.prefsByKhatib[k.id] = new Set(k.preferences || []);
       });
 
-      var m = await api('listMosques');
       state.mosques = {};
       m.mosques.forEach(function (x) { state.mosques[x.id] = x; });
-
-      var fs = nextFridays(8);
-      state._window = { from: fs[0], to: fs[fs.length - 1] };
     }
 
     async function load(date) {
@@ -149,12 +165,15 @@
       showLoading(el('main'), 'جاري تحميل التوزيع...');
 
       try {
-        var d = await api('getSchedule', { date: date });
+        var results = await Promise.all([
+          api('getSchedule', { date: date }),
+          refreshLoadCounts()
+        ]);
+        var d = results[0];
         state.version = d.version;
         state.rows = d.rows;
 
         if (!d.exists) { renderGenerate(); appReady(); return; }
-        await refreshLoadCounts();
         render();
       } catch (e) {
         showError(el('main'), e.message, function () { load(date); });
@@ -316,7 +335,7 @@
         });
       });
 
-      return '<select class="row-select" data-mosque="' + esc(r.mosqueId) + '">' + opts + '</select>';
+      return '<select class="row-select khatib-tom-select" data-mosque="' + esc(r.mosqueId) + '">' + opts + '</select>';
     }
 
     function statusHtml(r, e) {
@@ -325,6 +344,15 @@
         '<option value="confirmed"' + (e.status === 'confirmed' ? ' selected' : '') + '>مؤكد</option>' +
         '<option value="excused"' + (e.status === 'excused' ? ' selected' : '') + '>معتذر</option>' +
         '</select>';
+    }
+
+    function updateSaveButtonStatus() {
+      var dirtyCount = Object.keys(state.dirty).length;
+      var btn = el('saveBtn');
+      if (btn) {
+        btn.disabled = !dirtyCount;
+        btn.textContent = 'حفظ' + (dirtyCount ? ' (' + dirtyCount + ')' : '');
+      }
     }
 
     function wire() {
@@ -345,15 +373,46 @@
         n.focus(); n.setSelectionRange(pos, pos);
       };
 
-      document.querySelectorAll('[data-mosque].row-select').forEach(function (sel) {
-        sel.onchange = function () {
-          var id = this.dataset.mosque;
-          var row = state.rows.filter(function (r) { return r.mosqueId === id; })[0];
-          var cur = effective(row);
-          state.dirty[id] = { khatibId: this.value, status: this.value ? (cur.status === 'excused' ? 'excused' : 'confirmed') : 'unassigned' };
-          if (state.dirty[id].khatibId === row.khatibId && state.dirty[id].status === row.status) delete state.dirty[id];
-          render();
-        };
+      if (window._tomSelectInstances) {
+        window._tomSelectInstances.forEach(function (ts) { try { ts.destroy(); } catch (e) {} });
+      }
+      window._tomSelectInstances = [];
+
+      document.querySelectorAll('.khatib-tom-select').forEach(function (sel) {
+        if (typeof TomSelect !== 'undefined') {
+          var ts = new TomSelect(sel, {
+            create: false,
+            placeholder: '— اختر خطيب —',
+            allowEmptyOption: true,
+            controlInput: null,
+            plugins: ['dropdown_input'],
+            direction: 'rtl',
+            onChange: function (val) {
+              var id = sel.dataset.mosque;
+              var row = state.rows.filter(function (r) { return r.mosqueId === id; })[0];
+              var cur = effective(row);
+              state.dirty[id] = { khatibId: val, status: val ? (cur.status === 'excused' ? 'excused' : 'confirmed') : 'unassigned' };
+              if (state.dirty[id].khatibId === row.khatibId && state.dirty[id].status === row.status) delete state.dirty[id];
+              
+              var rowEl = sel.closest('.table-row');
+              if (rowEl) {
+                if (state.dirty[id]) rowEl.classList.add('dirty');
+                else rowEl.classList.remove('dirty');
+              }
+              updateSaveButtonStatus();
+            }
+          });
+          window._tomSelectInstances.push(ts);
+        } else {
+          sel.onchange = function () {
+            var id = this.dataset.mosque;
+            var row = state.rows.filter(function (r) { return r.mosqueId === id; })[0];
+            var cur = effective(row);
+            state.dirty[id] = { khatibId: this.value, status: this.value ? (cur.status === 'excused' ? 'excused' : 'confirmed') : 'unassigned' };
+            if (state.dirty[id].khatibId === row.khatibId && state.dirty[id].status === row.status) delete state.dirty[id];
+            render();
+          };
+        }
       });
 
       document.querySelectorAll('[data-status]').forEach(function (sel) {

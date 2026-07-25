@@ -4,7 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>نشر الجدول — أوقاف 15 مايو</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.rtl.min.css">
   <link rel="stylesheet" href="assets/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 </head>
 <body>
   <div id="nav"></div>
@@ -71,9 +73,20 @@
 
         var banner = el('statusBanner');
         if (currentFrom && currentTo) {
+          var publicUrl = new URL('public.html', window.location.href).href;
           banner.className = 'notice notice-info';
-          banner.innerHTML = '📌 <strong>المنشور حاليًا للجمهور:</strong> من ' +
-            esc(formatDate(currentFrom)) + ' إلى ' + esc(formatDate(currentTo));
+          banner.innerHTML =
+            '<div>📌 <strong>المنشور حاليًا للجمهور:</strong> من ' +
+            esc(formatDate(currentFrom)) + ' إلى ' + esc(formatDate(currentTo)) + '</div>' +
+            '<div class="mt-2.5 p-2.5 bg-white rounded-3 border d-flex align-items-center justify-content-between gap-2 flex-wrap text-start" style="border-color:#bae6fd !important">' +
+              '<div class="d-flex align-items-center gap-2 overflow-hidden" style="flex:1;min-width:200px">' +
+                '<span class="fs-6">🔗</span>' +
+                '<a href="' + esc(publicUrl) + '" target="_blank" class="text-decoration-underline text-break fw-bold small" style="color:var(--navy)">' + esc(publicUrl) + '</a>' +
+              '</div>' +
+              '<button type="button" class="btn btn-sm btn-ok shadow-sm px-3 rounded-pill" onclick="copyPublicLink(\'' + esc(publicUrl) + '\')">' +
+                '📋 نسخ رابط النشر' +
+              '</button>' +
+            '</div>';
 
           el('publishFrom').value = currentFrom;
           el('publishTo').value = currentTo;
@@ -90,6 +103,28 @@
       } catch (e) {
         showError(el('previewContainer'), e.message, loadPublishSettings);
       }
+    }
+
+    function copyPublicLink(url) {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(url).then(function () {
+          toast('تم نسخ رابط النشر بنجاح 📋', 'ok');
+        }).catch(function () {
+          fallbackCopy(url);
+        });
+      } else {
+        fallbackCopy(url);
+      }
+    }
+
+    function fallbackCopy(url) {
+      var input = document.createElement('input');
+      input.value = url;
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand('copy');
+      document.body.removeChild(input);
+      toast('تم نسخ رابط النشر بنجاح 📋', 'ok');
     }
 
     el('publishFrom').addEventListener('change', updatePreview);
