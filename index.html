@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>دخول — أوقاف 15 مايو</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div class="container" style="max-width:400px;margin-top:8vh">
+    <h1><span>🕌</span> أوقاف 15 مايو</h1>
+    <p style="text-align:center;color:var(--muted);font-size:.9em;margin-bottom:20px">
+      تنسيق خطب الجمعة
+    </p>
+
+    <form id="loginForm" class="form-grid" autocomplete="on">
+      <div class="field">
+        <label for="username">اسم المستخدم</label>
+        <input type="text" id="username" name="username" autocomplete="username" required>
+      </div>
+      <div class="field">
+        <label for="password">كلمة المرور</label>
+        <input type="password" id="password" name="password" autocomplete="current-password" required>
+      </div>
+      <div id="loginError" class="notice notice-err" style="display:none"></div>
+      <button type="submit" class="btn" id="loginBtn" style="width:100%;padding:13px">دخول</button>
+    </form>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="config.js"></script>
+  <script src="assets/app.js"></script>
+  <script>
+    // لو فيه توكن صالح، عدّي على طول
+    (async function () {
+      if (!getToken()) return;
+      try { await api('whoami'); location.href = 'schedule.html'; } catch (e) { clearToken(); }
+    })();
+
+    el('loginForm').addEventListener('submit', async function (ev) {
+      ev.preventDefault();
+      var btn = el('loginBtn'), errBox = el('loginError');
+      errBox.style.display = 'none';
+      btn.disabled = true;
+      btn.textContent = 'جاري الدخول...';
+
+      try {
+        var data = await api('login', {
+          username: el('username').value.trim(),
+          password: el('password').value,
+        });
+        setToken(data.token);
+        localStorage.setItem('awqaf_name', data.displayName);
+        location.href = 'schedule.html';
+      } catch (e) {
+        errBox.textContent = e.message;
+        errBox.style.display = 'block';
+        el('password').value = '';
+        el('password').focus();
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'دخول';
+      }
+    });
+  </script>
+</body>
+</html>
