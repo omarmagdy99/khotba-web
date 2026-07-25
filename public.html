@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>جدول خطب الجمعة — 15 مايو</title>
+  <link rel="stylesheet" href="assets/style.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <style>
+    .table-header, .table-row { grid-template-columns: 2fr 1.2fr 2fr; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1><span>🕌</span> جدول خطب الجمعة <span>📍</span></h1>
+
+    <div id="dateBar" class="field" style="margin-bottom:16px;display:none">
+      <label for="dateSelect">📅 اختر الجمعة</label>
+      <select id="dateSelect"></select>
+    </div>
+
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="mosque">🔍 بحث باسم المسجد</button>
+      <button class="tab-btn" data-tab="khatib">🎙️ بحث باسم الخطيب</button>
+    </div>
+
+    <div class="search-box">
+      <span class="search-icon">🔍</span>
+      <input type="text" class="search-input" id="searchInput" placeholder="ابحث باسم المسجد..." autocomplete="off">
+      <button class="clear-btn" id="clearBtn" aria-label="مسح البحث">✕</button>
+    </div>
+
+    <div class="stats-bar">
+      <span>📊 إجمالي المساجد: <strong id="totalCount">0</strong></span>
+      <span class="total-badge" id="visibleCount">0</span>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-sm" id="pdfBtn">📄 استخراج PDF</button>
+        <button class="btn btn-sm btn-plain" id="resetBtn">🔄 عرض الكل</button>
+      </div>
+    </div>
+
+    <div id="pdfContent">
+      <h2 id="pdfTitle" style="text-align:center;color:var(--navy);font-size:1.05em;margin-bottom:12px"></h2>
+      <div id="results"></div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="config.js"></script>
+  <script src="assets/app.js"></script>
+  <script>
+    var allData = [], currentTab = 'mosque', currentDate = '';
+
+    document.querySelectorAll('.tab-btn').forEach(function (b) {
+      b.addEventListener('click', function () {
+        document.querySelectorAll('.tab-btn').forEach(function (x) { x.classList.remove('active'); });
+        b.classList.add('active');
+        currentTab = b.dataset.tab;
+        el('searchInput').placeholder = currentTab === 'mosque'
+          ? 'ابحث باسم المسجد...' : 'ابحث باسم الخطيب...';
+        render();
+      });
+    });
+
+    el('searchInput').addEventListener('input', function () {
+      el('clearBtn').classList.toggle('show', !!this.value);
+      render();
+    });
+    el('clearBtn').onclick = function () {
+      el('searchInput').value = ''; this.classList.remove('show'); render();
+    };
+    el('resetBtn').onclick = function () {
+      el('searchInput').value = ''; el('clearBtn').classList.remove('show'); render();
+    };
+    el('pdfBtn').onclick = function () {
+      exportPdf(el('pdfContent'), 'جدول-الخطب-' + (currentDate || ''));
+    };
+    el('dateSelect').onchange = function () { load(this.value); };
+
+    /**
+     * الصفحة دي عامة — بتستخدم doGet مش api()، فمفيش توكن ولا تسجيل دخول.
+     */
+    async function load(date) {
+      var box = el('results');
+      showLoading(box, 'جاري تحميل الجدول...');
+      try {
+        var url = APPS_SCRIPT_URL + (date ? '?date=' + encodeURIComponent(date) : '');
+        var res = await fetch(url);
+        var json = await res.json();
+        if (!json.ok) throw new Error(json.error.message);
+        var d = json.data;
+
+        if (!d.published || !d.dates.length) {
+          el('dateBar').style.display = 'none';
+          el('pdfTitle').textContent = '';
+          box.innerHTML = '<div class="state"><span class="state-icon">📭</span>' +
+            '<p>لم يتم نشر الجدول بعد</p></div>';
+          el('totalCount').textContent = '0';
+          el('visibleCount').textContent = '0';
+          return;
+        }
+
+        currentDate = d.date;
+        var sel = el('dateSelect');
+        el('dateBar').style.display = 'block';
+        sel.innerHTML = d.dates.map(function (x) {
+          return '<option value="' + esc(x.date) + '"' + (x.date === d.date ? ' selected' : '') +
+            '>' + esc(formatDate(x.date) + (x.label ? ' — ' + x.label : '')) + '</option>';
+        }).join('');
+
+        var chosen = d.dates.filter(function (x) { return x.date === d.date; })[0] || {};
+        el('pdfTitle').textContent = 'خطب ' + formatDate(d.date) +
+          (chosen.label ? ' — ' + chosen.label : '');
+
+        allData = d.rows;
+        el('totalCount').textContent = allData.length;
+        render();
+      } catch (e) {
+        showError(box, 'حدث خطأ في تحميل البيانات', function () { load(date); });
+      }
+    }
+
+    function render() {
+      var q = el('searchInput').value;
+      var rows = !q ? allData : allData.filter(function (r) {
+        return matches(currentTab === 'mosque' ? r.mosque : r.khatib, q);
+      });
+
+      el('visibleCount').textContent = rows.length;
+      var box = el('results');
+
+      if (!rows.length) { showEmpty(box, 'لا توجد نتائج للبحث'); return; }
+
+      box.innerHTML =
+        '<div class="table-container">' +
+        '<div class="table-header"><div>🕌 المسجد</div><div>📍 المجاورة</div><div>🎙️ الخطيب</div></div>' +
+        rows.map(function (r) {
+          return '<div class="table-row">' +
+            '<div data-label="المسجد">' + esc(r.mosque) + '</div>' +
+            '<div data-label="المجاورة"><span class="area-badge">' + esc(r.mujawra || '—') + '</span></div>' +
+            '<div data-label="الخطيب">' + (r.khatib
+              ? esc(r.khatib)
+              : '<span class="muted">لم يُحدد بعد</span>') + '</div>' +
+            '</div>';
+        }).join('') +
+        '</div>';
+    }
+
+    load('');
+  </script>
+</body>
+</html>

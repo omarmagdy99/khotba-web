@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>جدول خطيب — أوقاف 15 مايو</title>
+  <link rel="stylesheet" href="assets/style.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+</head>
+<body>
+  <div id="nav"></div>
+  <div class="container">
+    <h1><span>📋</span> جدول خطيب</h1>
+
+    <div class="form-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); align-items: end; background: #f8fafc; padding: 18px; border-radius: 18px; margin-bottom: 20px;">
+      <div class="field" style="margin:0">
+        <label for="khatibSelect">اختر الخطيب *</label>
+        <select id="khatibSelect">
+          <option value="">— اختر الخطيب —</option>
+        </select>
+      </div>
+
+      <div class="field" style="margin:0">
+        <label for="fromDate">من تاريخ</label>
+        <input type="date" id="fromDate">
+      </div>
+
+      <div class="field" style="margin:0">
+        <label for="toDate">إلى تاريخ</label>
+        <input type="date" id="toDate">
+      </div>
+
+      <div style="display:flex;gap:8px">
+        <button class="btn" id="showBtn" style="flex:1">عرض الجدول</button>
+        <button class="btn btn-plain" id="exportPdfBtn">📄 PDF</button>
+      </div>
+    </div>
+
+    <!-- Exportable Results Node -->
+    <div id="results"></div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="config.js"></script>
+  <script src="assets/app.js"></script>
+  <script>
+    renderNav('khatib-schedule.html');
+
+    var allKhatibs = [];
+    var initialKhatibId = '';
+
+    (async function () {
+      if (!await requireAuth()) return;
+      initDefaults();
+      await loadKhatibs();
+    })();
+
+    function initDefaults() {
+      // Read ?id= from URL parameters if present
+      var params = new URLSearchParams(window.location.search);
+      initialKhatibId = params.get('id') || '';
+
+      // Default date range: today to 8th Friday from now
+      el('fromDate').value = todayIso();
+      var fridays = nextFridays(8);
+      el('toDate').value = fridays[7] || fridays[fridays.length - 1];
+    }
+
+    async function loadKhatibs() {
+      try {
+        var res = await api('listKhatibs', { includeInactive: false });
+        allKhatibs = res.khatibs || [];
+
+        // Sort alphabetically
+        allKhatibs.sort(function (a, b) {
+          return (a.name || '').localeCompare(b.name || '', 'ar');
+        });
+
+        var sel = el('khatibSelect');
+        var html = '<option value="">— اختر الخطيب —</option>';
+        allKhatibs.forEach(function (k) {
+          html += '<option value="' + esc(k.id) + '">' + esc(k.name) + '</option>';
+        });
+        sel.innerHTML = html;
+
+        if (initialKhatibId && allKhatibs.some(function (k) { return k.id === initialKhatibId; })) {
+          sel.value = initialKhatibId;
+          await fetchSchedule();
+        } else {
+          showEmpty(el('results'), 'الرجاء اختيار خطيب وحدد الفترة الزمانية لعرض جدول خطبه');
+        }
+      } catch (e) {
+        showError(el('results'), e.message, loadKhatibs);
+      }
+    }
+
+    el('showBtn').addEventListener('click', fetchSchedule);
+    el('khatibSelect').addEventListener('change', fetchSchedule);
+
+    async function fetchSchedule() {
+      var khatibId = el('khatibSelect').value;
+      var from = el('fromDate').value;
+      var to = el('toDate').value;
+
+      if (!khatibId) {
+        showEmpty(el('results'), 'الرجاء اختيار خطيب أولاً');
+        return;
+      }
+      if (!from || !to) {
+        toast('يرجى تحديد تاريخ البداية والنهاية', 'err');
+        return;
+      }
+      if (from > to) {
+        toast('تاريخ البداية يجب أن يكون قبل أو يساوي تاريخ النهاية', 'err');
+        return;
+      }
+
+      var targetKhatib = allKhatibs.find(function (k) { return k.id === khatibId; });
+      var khatibName = targetKhatib ? targetKhatib.name : 'الخطيب';
+
+      showLoading(el('results'), 'جاري تحميل جدول الخطيب...');
+
+      try {
+        var res = await api('getKhatibSchedule', {
+          khatibId: khatibId,
+          from: from,
+          to: to
+        });
+        renderSchedule(khatibName, from, to, res.rows || []);
+      } catch (e) {
+        showError(el('results'), e.message, fetchSchedule);
+      }
+    }
+
+    function renderSchedule(khatibName, from, to, assignedRows) {
+      var assignedMap = {};
+      assignedRows.forEach(function (r) {
+        assignedMap[r.date] = r;
+      });
+
+      // Collect all Friday dates in [from, to] range
+      var allDates = [];
+      var dateMap = {};
+
+      var start = new Date(from);
+      var end = new Date(to);
+
+      var cur = new Date(Date.UTC(start.getFullYear(), start.getMonth(), start.getDate()));
+      var endUtc = Date.UTC(end.getFullYear(), end.getMonth(), end.getDate());
+
+      while (cur.getTime() <= endUtc) {
+        var iso = cur.toISOString().split('T')[0];
+        if (cur.getUTCDay() === 5) {
+          allDates.push(iso);
+          dateMap[iso] = true;
+        }
+        cur.setUTCDate(cur.getUTCDate() + 1);
+      }
+
+      // Add any non-Friday dates that exist in assignedRows (e.g. Special occasions/Eid)
+      assignedRows.forEach(function (r) {
+        if (!dateMap[r.date]) {
+          allDates.push(r.date);
+          dateMap[r.date] = true;
+        }
+      });
+
+      // Sort dates chronologically
+      allDates.sort();
+
+      var resContainer = el('results');
+
+      var filledCount = assignedRows.length;
+      var totalGridCount = allDates.length;
+
+      var html = '<div style="background:#fff; padding:20px; border-radius:18px; border:1px solid var(--line);">' +
+        '<!-- Header card inside printable node so PDF export contains full title and info -->' +
+        '<div style="text-align:center; margin-bottom:20px; border-bottom:2px solid var(--navy); padding-bottom:14px">' +
+          '<h2 style="color:var(--navy); font-size:1.35em; margin-bottom:6px">🎙️ جدول خطب الجمعة: ' + esc(khatibName) + '</h2>' +
+          '<p style="color:var(--muted); font-size:.9em">' +
+            'الفترة من <strong>' + esc(formatDate(from)) + '</strong> إلى <strong>' + esc(formatDate(to)) + '</strong>' +
+          '</p>' +
+          '<div style="margin-top:10px">' +
+            '<span class="total-badge">' + esc(filledCount) + ' خطب في الفترة المختارة</span>' +
+          '</div>' +
+        '</div>';
+
+      if (totalGridCount === 0) {
+        html += '<div class="state"><p>لا توجد أيام جمعة في الفترة المحددة</p></div></div>';
+        resContainer.innerHTML = html;
+        return;
+      }
+
+      html += '<div class="table-container">' +
+        '<div class="table-header" style="grid-template-columns: 1.5fr 1.2fr 2fr 1.2fr 1fr;">' +
+          '<div>التاريخ</div>' +
+          '<div>المناسبة / اليوم</div>' +
+          '<div>المسجد</div>' +
+          '<div>المجاورة</div>' +
+          '<div>الحالة</div>' +
+        '</div>';
+
+      allDates.forEach(function (dIso) {
+        var assign = assignedMap[dIso];
+        var labelText = assign && assign.label ? assign.label : (isFriday(dIso) ? 'جمعة' : 'مناسبة خاصة');
+
+        if (assign) {
+          var statusBadge = '';
+          if (assign.status === 'confirmed') {
+            statusBadge = '<span class="badge badge-volunteer">مؤكد</span>';
+          } else if (assign.status === 'excused') {
+            statusBadge = '<span class="badge badge-warn">معتذر</span>';
+          } else {
+            statusBadge = '<span class="badge badge-primary">' + esc(assign.status || 'مخصص') + '</span>';
+          }
+
+          html += '<div class="table-row" style="grid-template-columns: 1.5fr 1.2fr 2fr 1.2fr 1fr;">' +
+            '<div data-label="التاريخ"><strong>' + esc(formatDate(dIso)) + '</strong></div>' +
+            '<div data-label="المناسبة / اليوم">' + esc(labelText) + '</div>' +
+            '<div data-label="المسجد"><strong style="color:var(--navy)">' + esc(assign.mosque || '?') + '</strong></div>' +
+            '<div data-label="المجاورة">' + (assign.mujawra ? '<span class="area-badge">' + esc(assign.mujawra) + '</span>' : '<span class="muted">—</span>') + '</div>' +
+            '<div data-label="الحالة">' + statusBadge + '</div>' +
+          '</div>';
+        } else {
+          // Free Friday gap
+          html += '<div class="table-row" style="grid-template-columns: 1.5fr 1.2fr 2fr 1.2fr 1fr; background:#fafbfc">' +
+            '<div data-label="التاريخ">' + esc(formatDate(dIso)) + '</div>' +
+            '<div data-label="المناسبة / اليوم">' + esc(labelText) + '</div>' +
+            '<div data-label="المسجد"><span class="muted">— لا يوجد</span></div>' +
+            '<div data-label="المجاورة"><span class="muted">—</span></div>' +
+            '<div data-label="الحالة"><span class="badge badge-off">شاغر</span></div>' +
+          '</div>';
+        }
+      });
+
+      html += '</div></div>';
+      resContainer.innerHTML = html;
+    }
+
+    el('exportPdfBtn').addEventListener('click', function () {
+      var targetKhatib = allKhatibs.find(function (k) { return k.id === el('khatibSelect').value; });
+      var filename = 'جدول_' + (targetKhatib ? targetKhatib.name.replace(/\s+/g, '_') : 'الخطيب');
+      exportPdf(el('results'), filename);
+    });
+  </script>
+</body>
+</html>

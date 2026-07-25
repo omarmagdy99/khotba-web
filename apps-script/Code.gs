@@ -144,11 +144,12 @@ function route_(b) {
 
   switch (a) {
     case 'whoami':            return ok_({ username: user.username, displayName: user.display_name });
-    case 'listMosques':       return ok_({ mosques: listMosques_(b.includeInactive) });
-    case 'listKhatibs':       return ok_({ khatibs: listKhatibs_(b.includeInactive) });
+    case 'listMosques':       return ok_({ mosques: listMosques_(b.includeInactive).map(publicMosque_) });
+    case 'listKhatibs':       return ok_({ khatibs: listKhatibs_(b.includeInactive).map(publicKhatib_) });
     case 'getSchedule':       return getSchedule_(b.date);
     case 'getKhatibSchedule': return getKhatibSchedule_(b.khatibId, b.from, b.to);
     case 'listDates':         return ok_({ dates: listDates_() });
+    case 'getLoadCounts':     return ok_({ counts: loadCounts_(b.from, b.to) });
     case 'createMosque':      return saveMosque_(b, user, true);
     case 'updateMosque':      return saveMosque_(b, user, false);
     case 'deactivateMosque':  return deactivate_('mosques', b.id, user);
@@ -211,6 +212,24 @@ function purgeSessions() {
 }
 
 // ─────────────────────────────────────────────────────────── mosques & khatibs
+
+/**
+ * الشيت snake_case والـ JSON camelCase. التحويل بيحصل عند حدود الـ API فقط —
+ * الدوال الداخلية زي generateDate_ بتفضل تشتغل على صفوف الشيت الخام.
+ */
+function publicMosque_(m) {
+  return {
+    id: m.id, name: m.name, mujawra: m.mujawra, address: m.address,
+    permanentKhatibId: m.permanent_khatib_id, active: isTrue_(m.active),
+  };
+}
+
+function publicKhatib_(k) {
+  return {
+    id: k.id, name: k.name, phone: k.phone, type: k.type, notes: k.notes,
+    active: isTrue_(k.active), preferences: k.preferences || [],
+  };
+}
 
 function listMosques_(includeInactive) {
   return readTab_('mosques').filter(function (m) {
@@ -336,11 +355,16 @@ function deactivate_(tab, id, user) {
         }
       });
     } else {
+      // المسجد بيتوقف: الخطب القادمة اللي لسه مالهاش خطيب تتشال من الحساب،
+      // واللي ليها خطيب تتساب ويترد بعددها عشان الموظف ياخد باله.
+      var stillAssigned = 0;
       aRows.forEach(function (a, ai) {
-        if (a.mosque_id === id && a.date >= today && !a.khatib_id) {
-          aSheet.getRange(ai + 2, TABS.assignments.indexOf('status') + 1).setValue('unassigned');
-        }
+        if (a.mosque_id !== id || a.date < today) return;
+        if (a.khatib_id) { stillAssigned++; return; }
+        aSheet.getRange(ai + 2, TABS.assignments.indexOf('status') + 1).setValue('unassigned');
+        cleared.push({ date: a.date, mosqueId: a.mosque_id });
       });
+      return ok_({ clearedAssignments: cleared, clearedPermanentAt: [], stillAssigned: stillAssigned });
     }
 
     return ok_({ clearedAssignments: cleared, clearedPermanentAt: clearedPermanent });
@@ -422,6 +446,21 @@ function getKhatibSchedule_(khatibId, from, to) {
     });
 
   return ok_({ khatibId: khatibId, count: rows.length, rows: rows });
+}
+
+/**
+ * عدد الخطب لكل خطيب في فترة. مسحة واحدة على التبويب — البديل كان
+ * الواجهة تطلب كل جمعة على حدة، يعني 8 طلبات وثواني ضايعة على كل تحميل.
+ */
+function loadCounts_(from, to) {
+  var c = {};
+  readTab_('assignments').forEach(function (a) {
+    if (!a.khatib_id) return;
+    if (from && a.date < from) return;
+    if (to && a.date > to) return;
+    c[a.khatib_id] = (c[a.khatib_id] || 0) + 1;
+  });
+  return c;
 }
 
 function listDates_() {

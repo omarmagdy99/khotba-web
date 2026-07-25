@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>توزيع الخطب — أوقاف 15 مايو</title>
+  <link rel="stylesheet" href="assets/style.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <style>
+    .table-header, .table-row { grid-template-columns: 1.6fr 1fr 2.2fr 1fr; }
+    .friday-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+    .chip {
+      padding: 8px 16px; border-radius: 50px; border: 2px solid var(--line);
+      background: #f8fafc; cursor: pointer; font-family: inherit; font-size: .85em; font-weight: 600;
+    }
+    .chip:hover { border-color: var(--blue); }
+    .chip.active { background: var(--navy); color: #fff; border-color: var(--navy); }
+    .row-select { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; font-family: inherit; font-size: .9em; background: #fff; }
+    .row-select:focus { border-color: var(--blue); outline: none; }
+    .row-select.conflict { border-color: var(--err); background: #fef2f2; }
+    .sticky-bar {
+      position: sticky; top: 0; z-index: 10; background: #fff;
+      padding: 10px 0; border-bottom: 1px solid var(--line); margin-bottom: 12px;
+      display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+    }
+  </style>
+</head>
+<body>
+  <div id="nav"></div>
+  <div class="container">
+    <h1><span>📅</span> توزيع الخطب</h1>
+
+    <div class="friday-chips" id="fridayChips"></div>
+
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px">
+      <div class="field" style="flex:1;min-width:170px">
+        <label for="dateInput">التاريخ</label>
+        <input type="date" id="dateInput">
+      </div>
+      <div class="field" style="display:flex;align-items:center;gap:8px;padding-bottom:10px">
+        <input type="checkbox" id="specialToggle" style="width:auto">
+        <label for="specialToggle" style="margin:0">مناسبة خاصة</label>
+      </div>
+      <div class="field" id="labelField" style="flex:1;min-width:170px;display:none">
+        <label for="labelInput">اسم المناسبة</label>
+        <input type="text" id="labelInput" placeholder="الأولى من شوال">
+      </div>
+    </div>
+
+    <div id="dateNotice"></div>
+    <div id="main"></div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="config.js"></script>
+  <script src="assets/app.js"></script>
+  <script>
+    renderNav('schedule.html');
+
+    var state = {
+      date: '',
+      version: '',
+      rows: [],          // صفوف الجدول من السيرفر
+      khatibs: [],
+      mosques: {},
+      prefsByKhatib: {}, // khatibId -> Set(mosqueId)
+      loadCount: {},     // khatibId -> عدد الخطب في الفترة القادمة
+      dirty: {},         // mosqueId -> { khatibId, status }
+      filterEmpty: false,
+      search: '',
+    };
+
+    (async function () {
+      if (!await requireAuth()) return;
+      renderChips();
+      var f = nextFridays(1)[0];
+      el('dateInput').value = f;
+      await loadReference();
+      await load(f);
+    })();
+
+    // ── اختيار التاريخ ───────────────────────────────────────
+
+    function renderChips() {
+      el('fridayChips').innerHTML = nextFridays(4).map(function (d) {
+        return '<button class="chip" data-date="' + d + '">' + esc(formatDate(d)) + '</button>';
+      }).join('');
+      el('fridayChips').querySelectorAll('.chip').forEach(function (c) {
+        c.onclick = function () {
+          if (!confirmLeave()) return;
+          el('dateInput').value = c.dataset.date;
+          el('specialToggle').checked = false;
+          el('labelField').style.display = 'none';
+          load(c.dataset.date);
+        };
+      });
+    }
+
+    el('specialToggle').onchange = function () {
+      el('labelField').style.display = this.checked ? 'block' : 'none';
+    };
+
+    el('dateInput').onchange = function () {
+      var d = this.value;
+      if (!d) return;
+      if (!el('specialToggle').checked && !isFriday(d)) {
+        toast('اختر يوم جمعة، أو فعّل "مناسبة خاصة"', 'warn');
+        return;
+      }
+      if (!confirmLeave()) { this.value = state.date; return; }
+      load(d);
+    };
+
+    function confirmLeave() {
+      if (!Object.keys(state.dirty).length) return true;
+      return confirmBox('فيه تعديلات لسه متحفظتش. تسيب الصفحة؟');
+    }
+
+    window.addEventListener('beforeunload', function (e) {
+      if (Object.keys(state.dirty).length) { e.preventDefault(); e.returnValue = ''; }
+    });
+
+    // ── تحميل ────────────────────────────────────────────────
+
+    async function loadReference() {
+      var data = await api('listKhatibs');
+      state.khatibs = data.khatibs;
+      state.prefsByKhatib = {};
+      data.khatibs.forEach(function (k) {
+        state.prefsByKhatib[k.id] = new Set(k.preferences || []);
+      });
+
+      var m = await api('listMosques');
+      state.mosques = {};
+      m.mosques.forEach(function (x) { state.mosques[x.id] = x; });
+
+      var fs = nextFridays(8);
+      state._window = { from: fs[0], to: fs[fs.length - 1] };
+    }
+
+    async function load(date) {
+      state.date = date;
+      state.dirty = {};
+      state.filterEmpty = false;
+      state.search = '';
+      el('dateNotice').innerHTML = '';
+      showLoading(el('main'), 'جاري تحميل التوزيع...');
+
+      try {
+        var d = await api('getSchedule', { date: date });
+        state.version = d.version;
+        state.rows = d.rows;
+
+        if (!d.exists) { renderGenerate(); return; }
+        await refreshLoadCounts();
+        render();
+      } catch (e) {
+        showError(el('main'), e.message, function () { load(date); });
+      }
+    }
+
+    /**
+     * عدد الخطب لكل خطيب في الجُمع الثمانية القادمة — بيظهر جنب الاسم عشان
+     * الظلم في التوزيع يبان لحظة الاختيار. طلب واحد، والفشل فيه مايوقفش الشاشة.
+     */
+    async function refreshLoadCounts() {
+      try {
+        var res = await api('getLoadCounts', state._window);
+        state.loadCount = res.counts || {};
+      } catch (e) { state.loadCount = {}; }
+    }
+
+    // ── التوليد ──────────────────────────────────────────────
+
+    function renderGenerate() {
+      var special = el('specialToggle').checked;
+      el('main').innerHTML =
+        '<div class="state"><span class="state-icon">📋</span>' +
+        '<p>لم يتم إنشاء ' + (special ? 'هذه المناسبة' : 'هذه الجمعة') + ' بعد</p>' +
+        '<button class="btn" id="genBtn" title="آمن تضغطه أكتر من مرة — مش هيكرر ولا هيمسح حاجة">' +
+        (special ? 'توليد المناسبة' : 'توليد الجمعة') + '</button></div>';
+
+      el('genBtn').onclick = async function () {
+        this.disabled = true;
+        this.textContent = 'جاري التوليد...';
+        try {
+          var payload = { date: state.date };
+          if (special) {
+            payload.dateType = 'special';
+            payload.label = el('labelInput').value.trim();
+            if (!payload.label) { toast('اكتب اسم المناسبة', 'warn'); this.disabled = false; this.textContent = 'توليد المناسبة'; return; }
+          }
+          var d = await api('generateDate', payload);
+          state.rows = d.rows;
+          state.version = d.version;
+          el('dateNotice').innerHTML = '<div class="notice notice-info">تم إنشاء ' +
+            d.created + ' مسجد — <strong>' + d.prefilled + '</strong> اتملى تلقائيًا من الخطباء الثابتين، <strong>' +
+            (d.created - d.prefilled) + '</strong> محتاجين توزيع</div>';
+          await refreshLoadCounts();
+          render();
+        } catch (e) {
+          toast(e.message, 'err');
+          this.disabled = false;
+          this.textContent = special ? 'توليد المناسبة' : 'توليد الجمعة';
+        }
+      };
+    }
+
+    // ── العرض ────────────────────────────────────────────────
+
+    function effective(r) {
+      var d = state.dirty[r.mosqueId];
+      return d ? { khatibId: d.khatibId, status: d.status } : { khatibId: r.khatibId, status: r.status };
+    }
+
+    /** الخطباء المحجوزين في مساجد تانية نفس التاريخ. */
+    function bookedMap(exceptMosqueId) {
+      var m = {};
+      state.rows.forEach(function (r) {
+        if (r.mosqueId === exceptMosqueId) return;
+        var e = effective(r);
+        if (e.khatibId) m[e.khatibId] = r.mosqueId;
+      });
+      return m;
+    }
+
+    function render() {
+      var emptyCount = state.rows.filter(function (r) { return !effective(r).khatibId; }).length;
+      var dirtyCount = Object.keys(state.dirty).length;
+
+      var visible = state.rows.filter(function (r) {
+        if (state.filterEmpty && effective(r).khatibId) return false;
+        if (state.search) {
+          var m = state.mosques[r.mosqueId] || {};
+          if (!matches(m.name, state.search) && !matches(m.mujawra, state.search)) return false;
+        }
+        return true;
+      });
+
+      el('main').innerHTML =
+        '<div class="sticky-bar">' +
+          '<button class="btn ' + (emptyCount ? 'btn-danger' : 'btn-ok') + ' btn-sm" id="emptyBtn">' +
+            (emptyCount ? 'متبقي بدون خطيب: ' + emptyCount : 'كل المساجد متوزعة ✓') + '</button>' +
+          (state.filterEmpty ? '<button class="btn btn-plain btn-sm" id="allBtn">عرض الكل</button>' : '') +
+          '<span style="flex:1"></span>' +
+          '<button class="btn btn-sm btn-plain" id="pdfBtn">📄 استخراج PDF</button>' +
+          '<button class="btn btn-sm" id="saveBtn"' + (dirtyCount ? '' : ' disabled') + '>' +
+            'حفظ' + (dirtyCount ? ' (' + dirtyCount + ')' : '') + '</button>' +
+        '</div>' +
+        '<div class="search-box"><span class="search-icon">🔍</span>' +
+          '<input type="text" class="search-input" id="mosqueSearch" placeholder="ابحث باسم المسجد أو المجاورة..." value="' + esc(state.search) + '"></div>' +
+        '<div id="pdfArea">' +
+          '<h2 style="text-align:center;color:var(--navy);font-size:1em;margin-bottom:10px">توزيع ' + esc(formatDate(state.date)) + '</h2>' +
+          (visible.length ? tableHtml(visible) : '<div class="state"><p>لا توجد نتائج</p></div>') +
+        '</div>';
+
+      wire();
+    }
+
+    function tableHtml(rows) {
+      return '<div class="table-container">' +
+        '<div class="table-header"><div>🕌 المسجد</div><div>📍 المجاورة</div><div>🎙️ الخطيب</div><div>الحالة</div></div>' +
+        rows.map(rowHtml).join('') + '</div>';
+    }
+
+    function rowHtml(r) {
+      var m = state.mosques[r.mosqueId] || {};
+      var e = effective(r);
+      var cls = 'table-row' + (state.dirty[r.mosqueId] ? ' dirty' : '') + (!e.khatibId ? ' empty-slot' : '');
+      return '<div class="' + cls + '" data-mosque="' + esc(r.mosqueId) + '">' +
+        '<div data-label="المسجد">' + esc(m.name || r.mosque) + '</div>' +
+        '<div data-label="المجاورة"><span class="area-badge">' + esc(m.mujawra || '—') + '</span></div>' +
+        '<div data-label="الخطيب">' + selectHtml(r, e) + '</div>' +
+        '<div data-label="الحالة">' + statusHtml(r, e) + '</div>' +
+        '</div>';
+    }
+
+    /**
+     * الترتيب: الخطيب الثابت، ثم من اختار المسجد ده في تفضيلاته، ثم المتاحين،
+     * وأخيرًا المحجوزين — بيظهروا رمادي ومكتوب محجوزين فين، مش متشالين،
+     * عشان الموظف يفهم ليه مش عارف ياخد الشخص ده.
+     */
+    function selectHtml(r, e) {
+      var m = state.mosques[r.mosqueId] || {};
+      var booked = bookedMap(r.mosqueId);
+      var permanent = m.permanentKhatibId || '';
+
+      var groups = [[], [], [], []];
+      state.khatibs.forEach(function (k) {
+        var where = booked[k.id];
+        var count = state.loadCount[k.id] || 0;
+        var label = k.name + (count ? ' (' + count + ')' : '');
+        if (where) {
+          var wm = state.mosques[where] || {};
+          groups[3].push({ id: k.id, label: k.name + ' — محجوز: ' + (wm.name || '') + ' ' + (wm.mujawra || ''), off: true });
+        } else if (k.id === permanent) {
+          groups[0].push({ id: k.id, label: '★ ' + label + ' — خطيب ثابت' });
+        } else if ((state.prefsByKhatib[k.id] || new Set()).has(r.mosqueId)) {
+          groups[1].push({ id: k.id, label: '♦ ' + label });
+        } else {
+          groups[2].push({ id: k.id, label: label });
+        }
+      });
+
+      var opts = '<option value="">— اختر خطيب —</option>';
+      groups.forEach(function (g) {
+        g.forEach(function (o) {
+          opts += '<option value="' + esc(o.id) + '"' +
+            (o.id === e.khatibId ? ' selected' : '') +
+            (o.off ? ' disabled' : '') + '>' + esc(o.label) + '</option>';
+        });
+      });
+
+      return '<select class="row-select" data-mosque="' + esc(r.mosqueId) + '">' + opts + '</select>';
+    }
+
+    function statusHtml(r, e) {
+      if (!e.khatibId) return '<span class="badge badge-off">شاغر</span>';
+      return '<select class="row-select" data-status="' + esc(r.mosqueId) + '">' +
+        '<option value="confirmed"' + (e.status === 'confirmed' ? ' selected' : '') + '>مؤكد</option>' +
+        '<option value="excused"' + (e.status === 'excused' ? ' selected' : '') + '>معتذر</option>' +
+        '</select>';
+    }
+
+    function wire() {
+      el('emptyBtn').onclick = function () { state.filterEmpty = !state.filterEmpty; render(); };
+      var ab = el('allBtn');
+      if (ab) ab.onclick = function () { state.filterEmpty = false; render(); };
+
+      el('pdfBtn').onclick = function () { exportPdf(el('pdfArea'), 'توزيع-' + state.date); };
+      el('saveBtn').onclick = save;
+
+      var s = el('mosqueSearch');
+      s.oninput = function () {
+        var pos = this.selectionStart;
+        state.search = this.value;
+        render();
+        var n = el('mosqueSearch');
+        n.focus(); n.setSelectionRange(pos, pos);
+      };
+
+      document.querySelectorAll('[data-mosque].row-select').forEach(function (sel) {
+        sel.onchange = function () {
+          var id = this.dataset.mosque;
+          var row = state.rows.filter(function (r) { return r.mosqueId === id; })[0];
+          var cur = effective(row);
+          state.dirty[id] = { khatibId: this.value, status: this.value ? (cur.status === 'excused' ? 'excused' : 'confirmed') : 'unassigned' };
+          if (state.dirty[id].khatibId === row.khatibId && state.dirty[id].status === row.status) delete state.dirty[id];
+          render();
+        };
+      });
+
+      document.querySelectorAll('[data-status]').forEach(function (sel) {
+        sel.onchange = function () {
+          var id = this.dataset.status;
+          var row = state.rows.filter(function (r) { return r.mosqueId === id; })[0];
+          state.dirty[id] = { khatibId: effective(row).khatibId, status: this.value };
+          render();
+        };
+      });
+    }
+
+    // ── الحفظ ────────────────────────────────────────────────
+
+    async function save() {
+      var changes = Object.keys(state.dirty).map(function (id) {
+        return { mosqueId: id, khatibId: state.dirty[id].khatibId, status: state.dirty[id].status };
+      });
+      if (!changes.length) return;
+
+      var btn = el('saveBtn');
+      btn.disabled = true;
+      btn.textContent = 'جاري الحفظ...';
+
+      try {
+        var d = await api('saveSchedule', { date: state.date, version: state.version, changes: changes });
+        state.rows = d.rows;
+        state.version = d.version;
+        state.dirty = {};
+        toast('تم حفظ ' + changes.length + ' تعديل', 'ok');
+        await refreshLoadCounts();
+        render();
+      } catch (e) {
+        if (e.code === 'STALE_WRITE') return handleStale(e, changes);
+
+        if (e.code === 'KHATIB_DOUBLE_BOOKED') {
+          var d2 = e.details || {};
+          highlight(d2.mosques || [d2.conflictMosqueId]);
+        }
+        toast(e.message, 'err');
+        render();
+      }
+    }
+
+    /** لا نكتب فوق شغل حد تاني من غير ما نسأل، ولا نرمي شغل المستخدم. */
+    function handleStale(e, changes) {
+      var who = (e.details.conflicts || []).map(function (c) {
+        var m = state.mosques[c.mosqueId] || {};
+        return (m.name || c.mosqueId) + ' (' + c.updatedBy + ')';
+      }).join('، ');
+
+      el('dateNotice').innerHTML =
+        '<div class="notice notice-warn"><strong>حد تاني عدّل نفس الصفوف:</strong> ' + esc(who) +
+        '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">' +
+        '<button class="btn btn-sm btn-plain" id="reloadBtn">تحديث — اعرض نسخته</button>' +
+        '<button class="btn btn-sm btn-danger" id="forceBtn">اكتب فوقه</button></div></div>';
+
+      el('reloadBtn').onclick = function () { state.dirty = {}; load(state.date); };
+      el('forceBtn').onclick = async function () {
+        try {
+          var fresh = await api('getSchedule', { date: state.date });
+          var d = await api('saveSchedule', { date: state.date, version: fresh.version, changes: changes });
+          state.rows = d.rows; state.version = d.version; state.dirty = {};
+          el('dateNotice').innerHTML = '';
+          toast('تم الحفظ فوق النسخة الأخرى', 'warn');
+          render();
+        } catch (err) { toast(err.message, 'err'); }
+      };
+      render();
+    }
+
+    function highlight(mosqueIds) {
+      (mosqueIds || []).forEach(function (id) {
+        var sel = document.querySelector('[data-mosque="' + id + '"].row-select');
+        if (sel) sel.classList.add('conflict');
+      });
+    }
+  </script>
+</body>
+</html>

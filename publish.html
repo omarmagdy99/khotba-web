@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>نشر الجدول — أوقاف 15 مايو</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div id="nav"></div>
+  <div class="container">
+    <h1><span>📢</span> نشر الجدول للجمهور</h1>
+
+    <div id="statusBanner" class="notice notice-info" style="font-size:1em;text-align:center;padding:14px;margin-bottom:20px">
+      جاري تحميل حالة النشر...
+    </div>
+
+    <div class="form-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); background: #f8fafc; padding: 20px; border-radius: 18px; margin-bottom: 24px;">
+      <div class="field" style="margin:0">
+        <label for="publishFrom">من تاريخ (جمعة)</label>
+        <input type="date" id="publishFrom">
+      </div>
+
+      <div class="field" style="margin:0">
+        <label for="publishTo">إلى تاريخ (جمعة)</label>
+        <input type="date" id="publishTo">
+      </div>
+
+      <div style="display:flex;gap:10px;align-items:end;grid-column:1/-1">
+        <button class="btn btn-ok" id="publishBtn" style="flex:1">📢 نشر الجدول</button>
+        <button class="btn btn-danger" id="unpublishBtn">إلغاء النشر</button>
+      </div>
+    </div>
+
+    <h2 style="color:var(--navy);font-size:1.25em;margin-bottom:14px;display:flex;align-items:center;gap:8px">
+      <span>👁️</span> معاينة ما سيظهر للجمهور
+    </h2>
+
+    <!-- Date selector tabs for preview -->
+    <div class="tabs" id="previewDateTabs" style="display:none"></div>
+
+    <div id="previewContainer"></div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="config.js"></script>
+  <script src="assets/app.js"></script>
+  <script>
+    renderNav('publish.html');
+
+    var currentFrom = '';
+    var currentTo = '';
+    var activePreviewDate = '';
+    var previewDatesList = [];
+
+    (async function () {
+      if (!await requireAuth()) return;
+      await loadPublishSettings();
+    })();
+
+    async function loadPublishSettings() {
+      showLoading(el('previewContainer'), 'جاري تحميل بيانات النشر...');
+      try {
+        var res = await api('getSettings');
+        var settings = res.settings || {};
+
+        currentFrom = settings.publish_from || '';
+        currentTo = settings.publish_to || '';
+
+        var banner = el('statusBanner');
+        if (currentFrom && currentTo) {
+          banner.className = 'notice notice-info';
+          banner.innerHTML = '📌 <strong>المنشور حاليًا للجمهور:</strong> من ' +
+            esc(formatDate(currentFrom)) + ' إلى ' + esc(formatDate(currentTo));
+
+          el('publishFrom').value = currentFrom;
+          el('publishTo').value = currentTo;
+        } else {
+          banner.className = 'notice notice-warn';
+          banner.innerHTML = '⚠️ <strong>لم يتم نشر أي جدول حاليًا.</strong> الخدمة العامة متوقفة حتى تقوم بالنشر.';
+
+          var fridays = nextFridays(4);
+          el('publishFrom').value = fridays[0];
+          el('publishTo').value = fridays[3];
+        }
+
+        await updatePreview();
+      } catch (e) {
+        showError(el('previewContainer'), e.message, loadPublishSettings);
+      }
+    }
+
+    el('publishFrom').addEventListener('change', updatePreview);
+    el('publishTo').addEventListener('change', updatePreview);
+
+    async function updatePreview() {
+      var from = el('publishFrom').value;
+      var to = el('publishTo').value;
+
+      if (!from || !to) {
+        el('previewDateTabs').style.display = 'none';
+        showEmpty(el('previewContainer'), 'اختر تاريخ البداية والنهاية لمعاينة الجدول');
+        return;
+      }
+      if (from > to) {
+        el('previewDateTabs').style.display = 'none';
+        showEmpty(el('previewContainer'), 'تاريخ البداية يجب أن يكون قبل أو يساوي تاريخ النهاية');
+        return;
+      }
+
+      // Collect all Friday dates in range
+      previewDatesList = [];
+      var start = new Date(from);
+      var end = new Date(to);
+      var cur = new Date(Date.UTC(start.getFullYear(), start.getMonth(), start.getDate()));
+      var endUtc = Date.UTC(end.getFullYear(), end.getMonth(), end.getDate());
+
+      while (cur.getTime() <= endUtc) {
+        var iso = cur.toISOString().split('T')[0];
+        if (cur.getUTCDay() === 5) {
+          previewDatesList.push(iso);
+        }
+        cur.setUTCDate(cur.getUTCDate() + 1);
+      }
+
+      if (previewDatesList.length === 0) {
+        el('previewDateTabs').style.display = 'none';
+        showEmpty(el('previewContainer'), 'لا توجد أيايم جمعة في الفترة المختارة');
+        return;
+      }
+
+      // If active preview date not in list, pick first
+      if (!previewDatesList.includes(activePreviewDate)) {
+        activePreviewDate = previewDatesList[0];
+      }
+
+      renderDateTabs();
+      await loadPreviewForDate(activePreviewDate);
+    }
+
+    function renderDateTabs() {
+      var tabsContainer = el('previewDateTabs');
+      if (previewDatesList.length <= 1) {
+        tabsContainer.style.display = 'none';
+        return;
+      }
+
+      var html = previewDatesList.map(function (d) {
+        var isActive = d === activePreviewDate ? ' active' : '';
+        return '<button type="button" class="tab-btn' + isActive + '" onclick="switchPreviewDate(\'' + d + '\')">' +
+          esc(formatDate(d)) +
+        '</button>';
+      }).join('');
+
+      tabsContainer.innerHTML = html;
+      tabsContainer.style.display = 'flex';
+    }
+
+    async function switchPreviewDate(dIso) {
+      activePreviewDate = dIso;
+      renderDateTabs();
+      await loadPreviewForDate(dIso);
+    }
+
+    async function loadPreviewForDate(dIso) {
+      var previewBox = el('previewContainer');
+      showLoading(previewBox, 'جاري تحميل معاينة جمعة ' + formatDate(dIso) + '...');
+
+      try {
+        var res = await api('getSchedule', { date: dIso });
+        var rows = res.rows || [];
+
+        // Sort by mujawra then mosque name
+        rows.sort(function (a, b) {
+          var mjComp = (a.mujawra || '').localeCompare(b.mujawra || '', 'ar');
+          if (mjComp !== 0) return mjComp;
+          return (a.mosque || '').localeCompare(b.mosque || '', 'ar');
+        });
+
+        if (rows.length === 0) {
+          showEmpty(previewBox, 'لم يتم توليد توزيع لهذه الجمعة بعد (' + formatDate(dIso) + ')');
+          return;
+        }
+
+        var html = '<div style="background:#fff; padding:18px; border-radius:18px; border:1px solid var(--line);">' +
+          '<div style="margin-bottom:14px; text-align:center;">' +
+            '<h3 style="color:var(--navy); font-size:1.15em">جدول خطب الجمعة — ' + esc(formatDate(dIso)) + '</h3>' +
+            '<p style="color:var(--muted); font-size:.85em">هذه المعاينة توضح تماماً الشكل الذي يظهر للجمهور عند زيارة الرابط العام</p>' +
+          '</div>' +
+          '<div class="table-container">' +
+            '<div class="table-header" style="grid-template-columns: 2fr 1.2fr 2fr;">' +
+              '<div>🕌 المسجد</div>' +
+              '<div>📍 المجاورة</div>' +
+              '<div>🎙️ الخطيب</div>' +
+            '</div>';
+
+        rows.forEach(function (r) {
+          var khatibText = r.khatib && r.khatib.trim()
+            ? '<strong>' + esc(r.khatib) + '</strong>'
+            : '<span class="muted">لم يُحدد بعد</span>';
+
+          html += '<div class="table-row" style="grid-template-columns: 2fr 1.2fr 2fr;">' +
+            '<div data-label="المسجد"><strong>' + esc(r.mosque) + '</strong></div>' +
+            '<div data-label="المجاورة"><span class="area-badge">' + esc(r.mujawra) + '</span></div>' +
+            '<div data-label="الخطيب">' + khatibText + '</div>' +
+          '</div>';
+        });
+
+        html += '</div></div>';
+        previewBox.innerHTML = html;
+      } catch (e) {
+        showError(previewBox, e.message, function () { loadPreviewForDate(dIso); });
+      }
+    }
+
+    // Publish button action
+    el('publishBtn').addEventListener('click', async function () {
+      var from = el('publishFrom').value;
+      var to = el('publishTo').value;
+
+      if (!from || !to) {
+        toast('يرجى تحديد تاريخ البداية والنهاية للنشر', 'err');
+        return;
+      }
+      if (from > to) {
+        toast('تاريخ البداية يجب أن يكون قبل أو يساوي تاريخ النهاية', 'err');
+        return;
+      }
+
+      var btn = el('publishBtn');
+      btn.disabled = true;
+      btn.textContent = 'جاري النشر...';
+
+      try {
+        await api('publishRange', { from: from, to: to });
+        toast('تم نشر الجدول للجمهور بنجاح 📢', 'ok');
+        await loadPublishSettings();
+      } catch (e) {
+        toast(e.message, 'err');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '📢 نشر الجدول';
+      }
+    });
+
+    // Unpublish button action
+    el('unpublishBtn').addEventListener('click', async function () {
+      var msg = 'هل أنت تأكد من إلغاء نشر الجدول؟\nسيؤدي هذا إلى إخفاء الجدول عن جميع زوار الموقع العام فورًا.';
+      if (!confirmBox(msg)) return;
+
+      var btn = el('unpublishBtn');
+      btn.disabled = true;
+
+      try {
+        await api('publishRange', { from: '', to: '' });
+        toast('تم إلغاء نشر الجدول بنجاح', 'ok');
+        await loadPublishSettings();
+      } catch (e) {
+        toast(e.message, 'err');
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

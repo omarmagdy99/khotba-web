@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>إدارة الخطباء — أوقاف 15 مايو</title>
+  <link rel="stylesheet" href="assets/style.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+</head>
+<body>
+  <div id="nav"></div>
+  <div class="container">
+    <h1><span>🎙️</span> إدارة الخطباء</h1>
+
+    <div class="tabs" id="typeTabs">
+      <button class="tab-btn active" data-tab="all">الكل</button>
+      <button class="tab-btn" data-tab="primary">أساسي</button>
+      <button class="tab-btn" data-tab="volunteer">متطوع</button>
+      <button class="tab-btn" data-tab="inactive">غير نشط</button>
+    </div>
+
+    <div class="search-box">
+      <span class="search-icon">🔍</span>
+      <input type="text" id="searchInput" class="search-input" placeholder="ابحث باسم الخطيب أو رقم الهاتف...">
+      <button id="clearSearchBtn" class="clear-btn">✕</button>
+    </div>
+
+    <div class="stats-bar">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span>إجمالي الخطباء: </span><strong id="totalCount">0</strong>
+        <span>|</span>
+        <span>الظاهر: </span><strong id="visibleCount">0</strong>
+        <span>|</span>
+        <button type="button" class="btn-link" id="missingPhoneBtn" style="font-weight:600;color:var(--err)">
+          ⚠️ ناقص رقم الهاتف: <strong id="missingPhoneCount">0</strong>
+        </button>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button class="btn btn-ok" id="addKhatibBtn">➕ إضافة خطيب</button>
+        <button class="btn btn-plain" id="exportPdfBtn">📄 استخراج PDF</button>
+        <button class="btn btn-plain" id="resetFiltersBtn">🔄 عرض الكل</button>
+      </div>
+    </div>
+
+    <div id="results"></div>
+  </div>
+
+  <!-- Modal for Add / Edit Khatib -->
+  <div id="khatibModal" class="modal-backdrop">
+    <div class="modal">
+      <h2 id="modalTitle">إضافة خطيب جديد</h2>
+      <form id="khatibForm" class="form-grid">
+        <input type="hidden" id="khatibId">
+
+        <div class="field">
+          <label for="khatibName">اسم الخطيب *</label>
+          <input type="text" id="khatibName" required placeholder="مثال: أحمد محمد علي">
+          <div id="nameWarn" class="hint" style="color:var(--warn);display:none">⚠️ تنبيه: يوجد خطيب آخر بنفس الاسم أو باسم مشابه</div>
+        </div>
+
+        <div class="field">
+          <label for="khatibPhone">رقم الهاتف (11 رقم يبدأ بـ 01)</label>
+          <input type="tel" id="khatibPhone" placeholder="01xxxxxxxxx">
+          <div id="phoneError" class="error-text" style="display:none">رقم الهاتف يجب أن يتكون من 11 رقم ويبدأ بـ 01</div>
+        </div>
+
+        <div class="field">
+          <label>نوع الخطيب *</label>
+          <div class="radio-row">
+            <label><input type="radio" name="khatibType" value="primary" checked> أساسي</label>
+            <label><input type="radio" name="khatibType" value="volunteer"> متطوع</label>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="khatibNotes">ملاحظات</label>
+          <textarea id="khatibNotes" rows="2" placeholder="ملاحظات أو مؤهلات إضافية"></textarea>
+        </div>
+
+        <div class="field" id="activeToggleField" style="display:none">
+          <div class="radio-row">
+            <label><input type="checkbox" id="khatibActive" checked> خطيب نشط</label>
+          </div>
+        </div>
+
+        <div id="formError" class="notice notice-err" style="display:none"></div>
+
+        <div class="modal-actions">
+          <button type="submit" class="btn" id="saveKhatibBtn">حفظ البيانات</button>
+          <button type="button" class="btn btn-plain" id="cancelKhatibBtn">إلغاء</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal for Preferences -->
+  <div id="prefsModal" class="modal-backdrop">
+    <div class="modal" style="max-width:600px">
+      <h2>تحديد المساجد المفضلة للخطيب</h2>
+      <p style="color:var(--muted);font-size:.9em;margin-bottom:12px">
+        الخطيب: <strong id="prefsKhatibName" style="color:var(--navy)"></strong>
+      </p>
+
+      <div class="search-box" style="margin-bottom:12px">
+        <span class="search-icon">🔍</span>
+        <input type="text" id="prefSearchInput" class="search-input" placeholder="بحث باسم المسجد أو المجاورة...">
+      </div>
+
+      <div id="prefsMosqueList" style="max-height:280px;overflow-y:auto;border:1px solid var(--line);border-radius:12px;padding:10px;margin-bottom:16px;background:#f8fafc">
+      </div>
+
+      <div class="modal-actions">
+        <button type="button" class="btn" id="savePrefsBtn">حفظ التفضيلات</button>
+        <button type="button" class="btn btn-plain" id="cancelPrefsBtn">إلغاء</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="config.js"></script>
+  <script src="assets/app.js"></script>
+  <script>
+    renderNav('khatibs.html');
+
+    var allKhatibs = [];
+    var allMosques = [];
+    var mosqueMap = {};
+    var currentTab = 'all';
+    var filterMissingPhone = false;
+    var isEditing = false;
+
+    var prefsKhatibId = null;
+    var selectedMosqueIds = new Set();
+
+    (async function () {
+      if (!await requireAuth()) return;
+      await loadData();
+    })();
+
+    async function loadData() {
+      showLoading(el('results'), 'جاري تحميل الخطباء والمساجد...');
+      try {
+        var resK = await api('listKhatibs', { includeInactive: true });
+        var resM = await api('listMosques', { includeInactive: false });
+        allKhatibs = resK.khatibs || [];
+        allMosques = resM.mosques || [];
+
+        mosqueMap = {};
+        allMosques.forEach(function (m) {
+          mosqueMap[m.id] = m.name + ' (' + m.mujawra + ')';
+        });
+
+        renderList();
+      } catch (e) {
+        showError(el('results'), e.message, loadData);
+      }
+    }
+
+    function isTrue(val) {
+      return String(val).toUpperCase() === 'TRUE';
+    }
+
+    function getFilteredKhatibs() {
+      var query = el('searchInput').value.trim();
+
+      return allKhatibs.filter(function (k) {
+        var active = isTrue(k.active);
+
+        // Filter by tab
+        if (currentTab === 'all' && !active) return false;
+        if (currentTab === 'primary' && (!active || k.type !== 'primary')) return false;
+        if (currentTab === 'volunteer' && (!active || k.type !== 'volunteer')) return false;
+        if (currentTab === 'inactive' && active) return false;
+
+        // Filter by missing phone
+        if (filterMissingPhone) {
+          if (k.phone && k.phone.trim()) return false;
+        }
+
+        // Filter by search text
+        if (query) {
+          var matchName = matches(k.name, query);
+          var matchPhone = k.phone && k.phone.includes(query);
+          if (!matchName && !matchPhone) return false;
+        }
+
+        return true;
+      });
+    }
+
+    function renderList() {
+      var items = getFilteredKhatibs();
+
+      // Sort alphabetically by name
+      items.sort(function (a, b) {
+        return (a.name || '').localeCompare(b.name || '', 'ar');
+      });
+
+      var activeKhatibs = allKhatibs.filter(function (k) { return isTrue(k.active); });
+      var missingCount = activeKhatibs.filter(function (k) { return !k.phone || !k.phone.trim(); }).length;
+
+      el('totalCount').textContent = allKhatibs.length;
+      el('visibleCount').textContent = items.length;
+      el('missingPhoneCount').textContent = missingCount;
+
+      var missingBtn = el('missingPhoneBtn');
+      if (filterMissingPhone) {
+        missingBtn.style.textDecoration = 'underline';
+        missingBtn.style.background = '#fee2e2';
+        missingBtn.style.padding = '2px 8px';
+        missingBtn.style.borderRadius = '20px';
+      } else {
+        missingBtn.style.textDecoration = 'none';
+        missingBtn.style.background = 'transparent';
+        missingBtn.style.padding = '0';
+      }
+
+      var resContainer = el('results');
+      if (allKhatibs.length === 0) {
+        showEmpty(resContainer, 'لا يوجد خطباء مسجلون حاليًا. اضغط إضافة خطيب.');
+        return;
+      }
+      if (items.length === 0) {
+        showEmpty(resContainer, 'لا يوجد خطباء مطابقون للتصفية أو البحث');
+        return;
+      }
+
+      var html = '<div class="table-container">' +
+        '<div class="table-header" style="grid-template-columns: 2fr 1.3fr 1fr 2.2fr 2fr;">' +
+          '<div>الاسم</div>' +
+          '<div>رقم الهاتف</div>' +
+          '<div>النوع</div>' +
+          '<div>المساجد المفضلة</div>' +
+          '<div>إجراءات</div>' +
+        '</div>';
+
+      items.forEach(function (k) {
+        var active = isTrue(k.active);
+        var typeBadge = '';
+        if (!active) {
+          typeBadge = '<span class="badge badge-off">غير نشط</span>';
+        } else if (k.type === 'volunteer') {
+          typeBadge = '<span class="badge badge-volunteer">متطوع</span>';
+        } else {
+          typeBadge = '<span class="badge badge-primary">أساسي</span>';
+        }
+
+        var phoneHtml = k.phone && k.phone.trim()
+          ? '<span class="mono">' + esc(k.phone) + '</span>'
+          : '<span class="missing">⚠️ ناقص</span>';
+
+        // Format preferences
+        var prefs = k.preferences || [];
+        var prefsHtml = '';
+        if (prefs.length === 0) {
+          prefsHtml = '<span class="muted">غير محدد</span>';
+        } else {
+          var names = prefs.map(function (mid) { return mosqueMap[mid] || mid; });
+          if (names.length <= 2) {
+            prefsHtml = esc(names.join('، '));
+          } else {
+            prefsHtml = esc(names.slice(0, 2).join('، ')) + ' <span class="badge badge-primary">+' + (names.length - 2) + '</span>';
+          }
+        }
+
+        html += '<div class="table-row" style="grid-template-columns: 2fr 1.3fr 1fr 2.2fr 2fr;">' +
+          '<div data-label="الاسم"><a href="khatib-schedule.html?id=' + esc(k.id) + '" style="color:var(--navy);font-weight:600;text-decoration:none">' + esc(k.name) + '</a></div>' +
+          '<div data-label="رقم الهاتف">' + phoneHtml + '</div>' +
+          '<div data-label="النوع">' + typeBadge + '</div>' +
+          '<div data-label="المساجد المفضلة">' + prefsHtml + '</div>' +
+          '<div data-label="إجراءات" style="display:flex;gap:4px;flex-wrap:wrap">' +
+            '<button class="btn btn-sm btn-plain" onclick="openEditModal(\'' + esc(k.id) + '\')">تعديل</button>' +
+            '<button class="btn btn-sm btn-plain" onclick="openPrefsModal(\'' + esc(k.id) + '\')">التفضيلات</button>' +
+            '<a href="khatib-schedule.html?id=' + esc(k.id) + '" class="btn btn-sm btn-plain" style="text-decoration:none">الجدول</a>' +
+            (active
+              ? '<button class="btn btn-sm btn-danger" onclick="toggleActive(\'' + esc(k.id) + '\', false)">إلغاء التنشيط</button>'
+              : '<button class="btn btn-sm btn-ok" onclick="toggleActive(\'' + esc(k.id) + '\', true)">تنشيط</button>') +
+          '</div>' +
+        '</div>';
+      });
+
+      html += '</div>';
+      resContainer.innerHTML = html;
+    }
+
+    // Tab buttons
+    var tabBtns = document.querySelectorAll('#typeTabs .tab-btn');
+    tabBtns.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        tabBtns.forEach(function (b) { b.classList.remove('active'); });
+        this.classList.add('active');
+        currentTab = this.getAttribute('data-tab');
+        renderList();
+      });
+    });
+
+    // Search input & clear button
+    el('searchInput').addEventListener('input', function () {
+      var btn = el('clearSearchBtn');
+      if (this.value) btn.classList.add('show'); else btn.classList.remove('show');
+      renderList();
+    });
+
+    el('clearSearchBtn').addEventListener('click', function () {
+      el('searchInput').value = '';
+      this.classList.remove('show');
+      renderList();
+    });
+
+    // Missing phone filter button toggle
+    el('missingPhoneBtn').addEventListener('click', function () {
+      filterMissingPhone = !filterMissingPhone;
+      renderList();
+    });
+
+    // Reset filters
+    el('resetFiltersBtn').addEventListener('click', function () {
+      currentTab = 'all';
+      filterMissingPhone = false;
+      el('searchInput').value = '';
+      el('clearSearchBtn').classList.remove('show');
+      tabBtns.forEach(function (b) {
+        if (b.getAttribute('data-tab') === 'all') b.classList.add('active');
+        else b.classList.remove('active');
+      });
+      renderList();
+    });
+
+    // PDF Export
+    el('exportPdfBtn').addEventListener('click', function () {
+      exportPdf(el('results'), 'جدول_الخطباء');
+    });
+
+    // Add / Edit Modal logic
+    el('addKhatibBtn').addEventListener('click', openAddModal);
+    el('cancelKhatibBtn').addEventListener('click', closeModal);
+
+    function openAddModal() {
+      isEditing = false;
+      el('modalTitle').textContent = 'إضافة خطيب جديد';
+      el('khatibForm').reset();
+      el('khatibId').value = '';
+      el('activeToggleField').style.display = 'none';
+      el('nameWarn').style.display = 'none';
+      el('phoneError').style.display = 'none';
+      hideFormError();
+      el('khatibModal').classList.add('show');
+    }
+
+    function openEditModal(id) {
+      var k = allKhatibs.find(function (x) { return x.id === id; });
+      if (!k) return;
+      isEditing = true;
+      el('modalTitle').textContent = 'تعديل بيانات الخطيب';
+      el('khatibId').value = k.id;
+      el('khatibName').value = k.name || '';
+      el('khatibPhone').value = k.phone || '';
+      el('khatibNotes').value = k.notes || '';
+      el('khatibActive').checked = isTrue(k.active);
+
+      var typeRadios = document.getElementsByName('khatibType');
+      for (var i = 0; i < typeRadios.length; i++) {
+        typeRadios[i].checked = (typeRadios[i].value === k.type);
+      }
+
+      el('activeToggleField').style.display = 'block';
+      el('nameWarn').style.display = 'none';
+      el('phoneError').style.display = 'none';
+      hideFormError();
+      el('khatibModal').classList.add('show');
+    }
+
+    function closeModal() {
+      el('khatibModal').classList.remove('show');
+      hideFormError();
+    }
+
+    function showFormError(msg) {
+      var errBox = el('formError');
+      errBox.textContent = msg;
+      errBox.style.display = 'block';
+    }
+
+    function hideFormError() {
+      var errBox = el('formError');
+      errBox.style.display = 'none';
+      errBox.textContent = '';
+    }
+
+    // Inline warn on duplicate name
+    el('khatibName').addEventListener('input', function () {
+      var val = this.value.trim();
+      var currentId = el('khatibId').value;
+      if (!val) { el('nameWarn').style.display = 'none'; return; }
+      var hasDuplicate = allKhatibs.some(function (k) {
+        return k.id !== currentId && matches(k.name, val);
+      });
+      el('nameWarn').style.display = hasDuplicate ? 'block' : 'none';
+    });
+
+    // Form submission
+    el('khatibForm').addEventListener('submit', async function (ev) {
+      ev.preventDefault();
+      hideFormError();
+      el('phoneError').style.display = 'none';
+
+      var btn = el('saveKhatibBtn');
+      var name = el('khatibName').value.trim();
+      var phoneRaw = el('khatibPhone').value.trim();
+      var phoneClean = phoneRaw.replace(/[\s\-()]/g, '');
+      var notes = el('khatibNotes').value.trim();
+      var active = el('khatibActive').checked;
+      var id = el('khatibId').value;
+
+      var typeRadios = document.getElementsByName('khatibType');
+      var typeVal = 'primary';
+      for (var i = 0; i < typeRadios.length; i++) {
+        if (typeRadios[i].checked) typeVal = typeRadios[i].value;
+      }
+
+      if (!name) {
+        showFormError('اسم الخطيب مطلوب');
+        return;
+      }
+
+      if (phoneClean && !/^01\d{9}$/.test(phoneClean)) {
+        el('phoneError').style.display = 'block';
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = 'جاري الحفظ...';
+
+      var action = isEditing ? 'updateKhatib' : 'createKhatib';
+      var payload = {
+        name: name,
+        phone: phoneClean,
+        type: typeVal,
+        notes: notes
+      };
+      if (isEditing) {
+        payload.id = id;
+        payload.active = active;
+      }
+
+      try {
+        var res = await api(action, payload);
+        if (!isEditing && res.similarTo && res.similarTo.length > 0) {
+          toast('تم إضافة الخطيب بنجاح. تنبيه: يوجد خطيب آخر بنفس الاسم أو اسم مشابه.', 'warn');
+        } else {
+          toast('تم حفظ بيانات الخطيب بنجاح', 'ok');
+        }
+        closeModal();
+        await loadData();
+      } catch (e) {
+        showFormError(e.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'حفظ البيانات';
+      }
+    });
+
+    // Deactivation / Activation logic
+    async function toggleActive(id, newActiveState) {
+      var k = allKhatibs.find(function (x) { return x.id === id; });
+      if (!k) return;
+
+      if (!newActiveState) {
+        var msg = 'هل أنت تأكد من إلغاء تنشيط "' + k.name + '"؟\nسيتم إخلاؤه من أي مسجد ثابت ومن أي خطب قادمة.';
+        if (!confirmBox(msg)) return;
+      }
+
+      try {
+        if (!newActiveState) {
+          var res = await api('deactivateKhatib', { id: id });
+          var clearedAss = res.clearedAssignments ? res.clearedAssignments.length : 0;
+          var clearedPerm = res.clearedPermanentAt ? res.clearedPermanentAt.length : 0;
+          var detailMsg = 'تم إلغاء تنشيط الخطيب.';
+          if (clearedAss > 0 || clearedPerm > 0) {
+            detailMsg += ' (تم إخلاء ' + clearedAss + ' خطبة قادمة و ' + clearedPerm + ' مساجد دائمة)';
+          }
+          toast(detailMsg, 'ok');
+        } else {
+          await api('updateKhatib', {
+            id: k.id,
+            name: k.name,
+            phone: k.phone || '',
+            type: k.type || 'primary',
+            notes: k.notes || '',
+            active: true
+          });
+          toast('تم إعادة تنشيط الخطيب بنجاح', 'ok');
+        }
+        await loadData();
+      } catch (e) {
+        toast(e.message, 'err');
+      }
+    }
+
+    // Preferences Modal logic
+    function openPrefsModal(khatibId) {
+      var k = allKhatibs.find(function (x) { return x.id === khatibId; });
+      if (!k) return;
+
+      prefsKhatibId = khatibId;
+      selectedMosqueIds = new Set(k.preferences || []);
+      el('prefsKhatibName').textContent = k.name;
+      el('prefSearchInput').value = '';
+
+      renderPrefsMosqueList();
+      el('prefsModal').classList.add('show');
+    }
+
+    function renderPrefsMosqueList() {
+      var query = el('prefSearchInput').value.trim();
+      var listContainer = el('prefsMosqueList');
+
+      var filteredMosques = allMosques.filter(function (m) {
+        if (!query) return true;
+        return matches(m.name, query) || matches(m.mujawra, query);
+      });
+
+      if (filteredMosques.length === 0) {
+        listContainer.innerHTML = '<div style="text-align:center;padding:16px;color:var(--muted)">لا توجد مساجد مطابقة للبحث</div>';
+        return;
+      }
+
+      var html = '';
+      filteredMosques.forEach(function (m) {
+        var isChecked = selectedMosqueIds.has(m.id) ? 'checked' : '';
+        html += '<label style="display:flex;align-items:center;gap:10px;padding:8px;border-bottom:1px solid var(--line);cursor:pointer">' +
+          '<input type="checkbox" value="' + esc(m.id) + '" ' + isChecked + ' onchange="togglePrefMosque(\'' + esc(m.id) + '\', this.checked)">' +
+          '<div>' +
+            '<strong>' + esc(m.name) + '</strong> ' +
+            '<span class="area-badge" style="font-size:.78em">' + esc(m.mujawra) + '</span>' +
+          '</div>' +
+        '</label>';
+      });
+
+      listContainer.innerHTML = html;
+    }
+
+    function togglePrefMosque(mosqueId, checked) {
+      if (checked) {
+        selectedMosqueIds.add(mosqueId);
+      } else {
+        selectedMosqueIds.delete(mosqueId);
+      }
+    }
+
+    el('prefSearchInput').addEventListener('input', renderPrefsMosqueList);
+
+    el('cancelPrefsBtn').addEventListener('click', function () {
+      el('prefsModal').classList.remove('show');
+    });
+
+    el('savePrefsBtn').addEventListener('click', async function () {
+      if (!prefsKhatibId) return;
+      var btn = el('savePrefsBtn');
+      btn.disabled = true;
+      btn.textContent = 'جاري الحفظ...';
+
+      var mosqueIdsArray = Array.from(selectedMosqueIds);
+      try {
+        await api('setPreferences', {
+          khatibId: prefsKhatibId,
+          mosqueIds: mosqueIdsArray
+        });
+        toast('تم حفظ التفضيلات بنجاح', 'ok');
+        el('prefsModal').classList.remove('show');
+        await loadData();
+      } catch (e) {
+        toast(e.message, 'err');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'حفظ التفضيلات';
+      }
+    });
+  </script>
+</body>
+</html>

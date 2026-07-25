@@ -125,6 +125,15 @@ function doPost(e) {
 | `getSchedule` | `{ date }` | the date's 85 assignment rows, each joined to mosque name/mujawra and khatib name |
 | `getKhatibSchedule` | `{ khatibId, from, to }` | one khatib's assignments in a range |
 | `listDates` | `{ from?, to? }` | every date that has assignment rows, with filled/empty counts |
+| `getLoadCounts` | `{ from?, to? }` | `{ counts: { khatibId: n } }` — sermons per khatib in the range |
+
+`getLoadCounts` exists so the scheduling screen can show each khatib's current load beside
+their name in one request. The obvious alternative — fetching each Friday and counting on the
+client — costs eight round trips of one to three seconds each on every page load.
+
+Read actions return **camelCase** (`permanentKhatibId`), matching what write actions accept.
+Internally the script keeps working on raw `snake_case` sheet rows; the conversion happens in
+`publicMosque_` / `publicKhatib_` at the API boundary only.
 
 `getSchedule` returns a `version` field — the maximum `updated_at` across the returned rows.
 The client sends it back on save. That is the whole concurrency story for the schedule screen.

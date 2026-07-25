@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>إدارة المساجد — أوقاف 15 مايو</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div id="nav"></div>
+  <div class="container">
+    <h1><span>🕌</span> إدارة المساجد</h1>
+
+    <div class="search-box">
+      <span class="search-icon">🔍</span>
+      <input type="text" id="searchInput" class="search-input" placeholder="ابحث باسم المسجد أو المجاورة...">
+      <button id="clearSearchBtn" class="clear-btn">✕</button>
+    </div>
+
+    <div class="stats-bar">
+      <div>
+        <span>إجمالي المساجد: </span><strong id="totalCount">0</strong>
+        <span style="margin: 0 8px;">|</span>
+        <span>الظاهر: </span><strong id="visibleCount">0</strong>
+      </div>
+      <button class="btn btn-ok" id="addMosqueBtn">➕ إضافة مسجد جديد</button>
+    </div>
+
+    <div id="results"></div>
+  </div>
+
+  <!-- modal for add / edit mosque -->
+  <div id="mosqueModal" class="modal-backdrop">
+    <div class="modal">
+      <h2 id="modalTitle">إضافة مسجد جديد</h2>
+      <form id="mosqueForm" class="form-grid">
+        <input type="hidden" id="mosqueId">
+
+        <div class="field">
+          <label for="mosqueName">اسم المسجد *</label>
+          <input type="text" id="mosqueName" required placeholder="مثال: النور المحمدي">
+          <div id="nameWarn" class="hint" style="color:var(--warn);display:none">⚠️ يوجد مسجد آخر باسم مشابه</div>
+        </div>
+
+        <div class="field">
+          <label for="mosqueMujawra">المجاورة *</label>
+          <input type="text" id="mosqueMujawra" list="mujawraList" required placeholder="اختر أو اكتب المجاورة">
+          <datalist id="mujawraList"></datalist>
+        </div>
+
+        <div class="field">
+          <label for="mosqueAddress">العنوان</label>
+          <textarea id="mosqueAddress" rows="2" placeholder="تفاصيل العنوان أو الملاحظات المكانية"></textarea>
+        </div>
+
+        <div class="field">
+          <label for="permanentKhatibId">الخطيب الثابت</label>
+          <select id="permanentKhatibId">
+            <option value="">— بدون خطيب ثابت —</option>
+          </select>
+        </div>
+
+        <div class="field" id="activeToggleField" style="display:none">
+          <div class="radio-row">
+            <label><input type="checkbox" id="mosqueActive" checked> مسجد نشط</label>
+          </div>
+        </div>
+
+        <div id="formError" class="notice notice-err" style="display:none"></div>
+
+        <div class="modal-actions">
+          <button type="submit" class="btn" id="saveMosqueBtn">حفظ البيانات</button>
+          <button type="button" class="btn btn-plain" id="cancelMosqueBtn">إلغاء</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="config.js"></script>
+  <script src="assets/app.js"></script>
+  <script>
+    renderNav('mosques.html');
+
+    var allMosques = [];
+    var allKhatibs = [];
+    var isEditing = false;
+
+    (async function () {
+      if (!await requireAuth()) return;
+      await loadData();
+    })();
+
+    async function loadData() {
+      showLoading(el('results'), 'جاري تحميل المساجد...');
+      try {
+        var resM = await api('listMosques', { includeInactive: true });
+        var resK = await api('listKhatibs', { includeInactive: false });
+        allMosques = resM.mosques || [];
+        allKhatibs = resK.khatibs || [];
+
+        buildMujawraDatalist();
+        buildKhatibSelectOptions();
+        renderList();
+      } catch (e) {
+        showError(el('results'), e.message, loadData);
+      }
+    }
+
+    function isTrue(val) {
+      return String(val).toUpperCase() === 'TRUE';
+    }
+
+    function buildMujawraDatalist() {
+      var dl = el('mujawraList');
+      var unique = {};
+      allMosques.forEach(function (m) {
+        if (m.mujawra && m.mujawra.trim()) unique[m.mujawra.trim()] = true;
+      });
+      dl.innerHTML = Object.keys(unique).map(function (mj) {
+        return '<option value="' + esc(mj) + '">';
+      }).join('');
+    }
+
+    function buildKhatibSelectOptions() {
+      var sel = el('permanentKhatibId');
+      var currentVal = sel.value;
+      var html = '<option value="">— بدون خطيب ثابت —</option>';
+      allKhatibs.forEach(function (k) {
+        html += '<option value="' + esc(k.id) + '">' + esc(k.name) + '</option>';
+      });
+      sel.innerHTML = html;
+      sel.value = currentVal;
+    }
+
+    function getFilteredMosques() {
+      var query = el('searchInput').value.trim();
+      if (!query) return allMosques.slice();
+      return allMosques.filter(function (m) {
+        return matches(m.name, query) || matches(m.mujawra, query);
+      });
+    }
+
+    function renderList() {
+      var items = getFilteredMosques();
+
+      // Sort by mujawra then name
+      items.sort(function (a, b) {
+        var mjComp = (a.mujawra || '').localeCompare(b.mujawra || '', 'ar');
+        if (mjComp !== 0) return mjComp;
+        return (a.name || '').localeCompare(b.name || '', 'ar');
+      });
+
+      el('totalCount').textContent = allMosques.length;
+      el('visibleCount').textContent = items.length;
+
+      var resContainer = el('results');
+      if (allMosques.length === 0) {
+        showEmpty(resContainer, 'لا توجد مساجد مسجلة حاليًا. اضغط إضافة مسجد جديد.');
+        return;
+      }
+      if (items.length === 0) {
+        showEmpty(resContainer, 'لا توجد مساجد مطابقة لنص البحث');
+        return;
+      }
+
+      var khatibMap = {};
+      allKhatibs.forEach(function (k) { khatibMap[k.id] = k.name; });
+
+      var html = '<div class="table-container">' +
+        '<div class="table-header" style="grid-template-columns: 2fr 1.2fr 2fr 1fr 1.5fr;">' +
+          '<div>اسم المسجد</div>' +
+          '<div>المجاورة</div>' +
+          '<div>الخطيب الثابت</div>' +
+          '<div>الحالة</div>' +
+          '<div>إجراءات</div>' +
+        '</div>';
+
+      items.forEach(function (m) {
+        var active = isTrue(m.active);
+        var permId = m.permanent_khatib_id || m.permanentKhatibId || '';
+        var permName = permId ? (khatibMap[permId] || permId) : '';
+
+        html += '<div class="table-row" style="grid-template-columns: 2fr 1.2fr 2fr 1fr 1.5fr;">' +
+          '<div data-label="اسم المسجد"><strong>' + esc(m.name) + '</strong></div>' +
+          '<div data-label="المجاورة"><span class="area-badge">' + esc(m.mujawra) + '</span></div>' +
+          '<div data-label="الخطيب الثابت">' + (permName ? esc(permName) : '<span class="muted">غير محدد</span>') + '</div>' +
+          '<div data-label="الحالة">' +
+            (active ? '<span class="badge badge-volunteer">نشط</span>' : '<span class="badge badge-off">غير نشط</span>') +
+          '</div>' +
+          '<div data-label="إجراءات" style="display:flex;gap:6px;flex-wrap:wrap">' +
+            '<button class="btn btn-sm btn-plain" onclick="openEditModal(\'' + esc(m.id) + '\')">تعديل</button>' +
+            (active
+              ? '<button class="btn btn-sm btn-danger" onclick="toggleActive(\'' + esc(m.id) + '\', false)">إلغاء التنشيط</button>'
+              : '<button class="btn btn-sm btn-ok" onclick="toggleActive(\'' + esc(m.id) + '\', true)">تنشيط</button>') +
+          '</div>' +
+        '</div>';
+      });
+
+      html += '</div>';
+      resContainer.innerHTML = html;
+    }
+
+    // Search and Clear buttons
+    el('searchInput').addEventListener('input', function () {
+      var btn = el('clearSearchBtn');
+      if (this.value) btn.classList.add('show'); else btn.classList.remove('show');
+      renderList();
+    });
+
+    el('clearSearchBtn').addEventListener('click', function () {
+      el('searchInput').value = '';
+      this.classList.remove('show');
+      renderList();
+    });
+
+    // Modal controls
+    el('addMosqueBtn').addEventListener('click', function () { openAddModal(); });
+    el('cancelMosqueBtn').addEventListener('click', closeModal);
+
+    function openAddModal() {
+      isEditing = false;
+      el('modalTitle').textContent = 'إضافة مسجد جديد';
+      el('mosqueForm').reset();
+      el('mosqueId').value = '';
+      el('activeToggleField').style.display = 'none';
+      el('nameWarn').style.display = 'none';
+      hideFormError();
+      el('mosqueModal').classList.add('show');
+    }
+
+    function openEditModal(id) {
+      var m = allMosques.find(function (x) { return x.id === id; });
+      if (!m) return;
+      isEditing = true;
+      el('modalTitle').textContent = 'تعديل بيانات المسجد';
+      el('mosqueId').value = m.id;
+      el('mosqueName').value = m.name || '';
+      el('mosqueMujawra').value = m.mujawra || '';
+      el('mosqueAddress').value = m.address || '';
+      el('permanentKhatibId').value = m.permanent_khatib_id || m.permanentKhatibId || '';
+      el('mosqueActive').checked = isTrue(m.active);
+      el('activeToggleField').style.display = 'block';
+      el('nameWarn').style.display = 'none';
+      hideFormError();
+      el('mosqueModal').classList.add('show');
+    }
+
+    function closeModal() {
+      el('mosqueModal').classList.remove('show');
+      hideFormError();
+    }
+
+    function showFormError(msg) {
+      var errBox = el('formError');
+      errBox.textContent = msg;
+      errBox.style.display = 'block';
+    }
+
+    function hideFormError() {
+      var errBox = el('formError');
+      errBox.style.display = 'none';
+      errBox.textContent = '';
+    }
+
+    el('mosqueName').addEventListener('input', function () {
+      var val = this.value.trim();
+      var currentId = el('mosqueId').value;
+      if (!val) { el('nameWarn').style.display = 'none'; return; }
+      var hasDuplicate = allMosques.some(function (m) {
+        return m.id !== currentId && matches(m.name, val);
+      });
+      el('nameWarn').style.display = hasDuplicate ? 'block' : 'none';
+    });
+
+    el('mosqueForm').addEventListener('submit', async function (ev) {
+      ev.preventDefault();
+      hideFormError();
+
+      var btn = el('saveMosqueBtn');
+      var name = el('mosqueName').value.trim();
+      var mujawra = el('mosqueMujawra').value.trim();
+      var address = el('mosqueAddress').value.trim();
+      var permanentKhatibId = el('permanentKhatibId').value;
+      var active = el('mosqueActive').checked;
+      var id = el('mosqueId').value;
+
+      if (!name || !mujawra) {
+        showFormError('اسم المسجد والمجاورة مطلوبان');
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = 'جاري الحفظ...';
+
+      var action = isEditing ? 'updateMosque' : 'createMosque';
+      var payload = {
+        name: name,
+        mujawra: mujawra,
+        address: address,
+        permanentKhatibId: permanentKhatibId
+      };
+      if (isEditing) {
+        payload.id = id;
+        payload.active = active;
+      }
+
+      try {
+        await api(action, payload);
+        toast('تم حفظ بيانات المسجد بنجاح', 'ok');
+        closeModal();
+        await loadData();
+      } catch (e) {
+        if (e.code === 'PERMANENT_CONFLICT' || e.code === 'DUPLICATE') {
+          showFormError(e.message);
+        } else {
+          toast(e.message, 'err');
+        }
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'حفظ البيانات';
+      }
+    });
+
+    async function toggleActive(id, newActiveState) {
+      var m = allMosques.find(function (x) { return x.id === id; });
+      if (!m) return;
+
+      if (!newActiveState) {
+        var msg = 'هل أنت تأكد من إلغاء تنشيط "' + m.name + '"؟\nسيبقى السجل التاريخي للمسجد محفوظًا وسختفي من شاشات التوزيع المستقبلي.';
+        if (!confirmBox(msg)) return;
+      }
+
+      try {
+        if (!newActiveState) {
+          await api('deactivateMosque', { id: id });
+          toast('تم إلغاء تنشيط المسجد بنجاح', 'ok');
+        } else {
+          await api('updateMosque', {
+            id: m.id,
+            name: m.name,
+            mujawra: m.mujawra,
+            address: m.address,
+            permanentKhatibId: m.permanent_khatib_id || m.permanentKhatibId || '',
+            active: true
+          });
+          toast('تم إعادة تنشيط المسجد بنجاح', 'ok');
+        }
+        await loadData();
+      } catch (e) {
+        toast(e.message, 'err');
+      }
+    }
+  </script>
+</body>
+</html>
