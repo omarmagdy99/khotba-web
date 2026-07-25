@@ -312,11 +312,14 @@ h1 {
   direction: rtl !important;
   text-align: right !important;
   border-radius: 12px !important;
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.15) !important;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.25) !important;
   border: 1px solid var(--line) !important;
-  overflow: hidden !important;
-  z-index: 1070 !important;
+  z-index: 99999 !important;
   background: #fff !important;
+}
+.ts-dropdown .ts-dropdown-content {
+  max-height: 280px !important;
+  overflow-y: auto !important;
 }
 .ts-dropdown .dropdown-input-wrap {
   padding: 6px 8px !important;
@@ -339,6 +342,9 @@ h1 {
 }
 .ts-dropdown .active {
   background-color: var(--navy) !important;
+  color: #fff !important;
+}
+.ts-dropdown .active span {
   color: #fff !important;
 }
 .ts-dropdown .option.disabled {
