@@ -308,33 +308,60 @@
 
       var groups = [[], [], [], []];
       state.khatibs.forEach(function (k) {
-        var where = booked[k.id];
-        var count = state.loadCount[k.id] || 0;
+        var kIdStr = String(k.id || '');
+        var where = booked[kIdStr];
+        var count = state.loadCount[kIdStr] || state.loadCount[k.id] || 0;
         var labelCount = count ? ' (' + count + ')' : '';
 
         if (where) {
-          var wm = state.mosques[where] || {};
-          var mosqueName = wm.name || 'مسجد آخر';
+          var wm = state.mosques[where] || state.mosques[String(where)] || {};
+          var mosqueName = wm.name || ('مسجد ' + where);
           groups[3].push({
-            id: k.id,
+            id: kIdStr,
             label: k.name + labelCount + ' — ⚠️ مسند إلى: ' + mosqueName
           });
-        } else if (k.id === permanent) {
-          groups[0].push({ id: k.id, label: '★ ' + k.name + labelCount + ' — خطيب ثابت' });
-        } else if ((state.prefsByKhatib[k.id] || new Set()).has(r.mosqueId)) {
-          groups[1].push({ id: k.id, label: '♦ ' + k.name + labelCount + ' — (مستهدف/مقترح)' });
+        } else if (kIdStr && kIdStr === permanent) {
+          groups[0].push({ id: kIdStr, label: '★ ' + k.name + labelCount + ' — خطيب ثابت' });
+        } else if ((state.prefsByKhatib[kIdStr] || state.prefsByKhatib[k.id] || new Set()).has(String(r.mosqueId))) {
+          groups[1].push({ id: kIdStr, label: '♦ ' + k.name + labelCount + ' — (مستهدف/مقترح)' });
         } else {
-          groups[2].push({ id: k.id, label: k.name + labelCount });
+          groups[2].push({ id: kIdStr, label: k.name + labelCount });
         }
       });
 
       var opts = '<option value="">— اختر خطيب —</option>';
-      groups.forEach(function (g) {
-        g.forEach(function (o) {
-          opts += '<option value="' + esc(o.id) + '"' +
-            (o.id === e.khatibId ? ' selected' : '') + '>' + esc(o.label) + '</option>';
+
+      if (groups[0].length) {
+        opts += '<optgroup label="★ الخطيب الثابت">';
+        groups[0].forEach(function (o) {
+          opts += '<option value="' + esc(o.id) + '"' + (String(o.id) === currentKhatibId ? ' selected' : '') + '>' + esc(o.label) + '</option>';
         });
-      });
+        opts += '</optgroup>';
+      }
+
+      if (groups[1].length) {
+        opts += '<optgroup label="♦ الخطباء المقترحون لهذا المسجد">';
+        groups[1].forEach(function (o) {
+          opts += '<option value="' + esc(o.id) + '"' + (String(o.id) === currentKhatibId ? ' selected' : '') + '>' + esc(o.label) + '</option>';
+        });
+        opts += '</optgroup>';
+      }
+
+      if (groups[2].length) {
+        opts += '<optgroup label="الخطباء المتاحون">';
+        groups[2].forEach(function (o) {
+          opts += '<option value="' + esc(o.id) + '"' + (String(o.id) === currentKhatibId ? ' selected' : '') + '>' + esc(o.label) + '</option>';
+        });
+        opts += '</optgroup>';
+      }
+
+      if (groups[3].length) {
+        opts += '<optgroup label="⚠️ خطباء مسندون لمساجد أخرى (يمكنك نقلهم هنا)">';
+        groups[3].forEach(function (o) {
+          opts += '<option value="' + esc(o.id) + '"' + (String(o.id) === currentKhatibId ? ' selected' : '') + '>' + esc(o.label) + '</option>';
+        });
+        opts += '</optgroup>';
+      }
 
       return '<select class="row-select khatib-tom-select" data-mosque="' + esc(r.mosqueId) + '">' + opts + '</select>';
     }

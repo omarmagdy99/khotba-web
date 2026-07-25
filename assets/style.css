@@ -347,9 +347,15 @@ h1 {
 .ts-dropdown .active span {
   color: #fff !important;
 }
-.ts-dropdown .option.disabled {
-  opacity: 0.5;
-  color: #94a3b8;
-  background-color: #f8fafc;
+.ts-dropdown .optgroup-header {
+  font-weight: 700 !important;
+  font-size: 0.82em !important;
+  color: var(--navy) !important;
+  background: #f1f5f9 !important;
+  padding: 6px 14px !important;
+  border-top: 1px solid var(--line) !important;
+  border-bottom: 1px solid var(--line) !important;
+  direction: rtl !important;
+  text-align: right !important;
 }
 
