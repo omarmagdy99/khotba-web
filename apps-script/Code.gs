@@ -34,6 +34,15 @@ var TEXT_COLUMNS = {
 var SESSION_DAYS = 7;
 var LOCK_MS = 20000;
 
+/**
+ * رقم النسخة. غيّره مع أي تعديل تنشره.
+ *
+ * افتح عنوان النشر وحط ?ping=1 في آخره عشان تشوف النسخة المنشورة فعلاً
+ * وقائمة الإجراءات اللي فيها. لو الرقم قديم يبقى النشر مأخدش الكود الجديد —
+ * وده بيحصل لما تحفظ في المحرر من غير ما تعمل Deploy → New version.
+ */
+var SCRIPT_VERSION = '2026-07-26';
+
 // ─────────────────────────────────────────────────────────── setup
 
 function setup() {
@@ -126,12 +135,24 @@ function doPost(e) {
 
 function doGet(e) {
   try {
+    if (e && e.parameter && e.parameter.ping) {
+      return json_(ok_({ version: SCRIPT_VERSION, actions: KNOWN_ACTIONS }));
+    }
     return json_(publicSchedule_((e && e.parameter && e.parameter.date) || ''));
   } catch (err) {
     console.error(err.stack || String(err));
     return json_(err_('INTERNAL', String(err && err.message || err)));
   }
 }
+
+var KNOWN_ACTIONS = [
+  'login', 'logout', 'whoami',
+  'listMosques', 'listKhatibs', 'getSchedule', 'getKhatibSchedule', 'listDates',
+  'getLoadCounts', 'getSettings',
+  'createMosque', 'updateMosque', 'deactivateMosque',
+  'createKhatib', 'updateKhatib', 'deactivateKhatib', 'setPreferences',
+  'generateDate', 'regenerateDate', 'saveSchedule', 'publishRange',
+];
 
 function route_(b) {
   var a = b.action;
@@ -163,7 +184,11 @@ function route_(b) {
     case 'publishRange':      return publishRange_(b.from, b.to);
     case 'getSettings':       return ok_({ settings: settingsMap_() });
   }
-  return err_('BAD_REQUEST', 'إجراء غير معروف: ' + a);
+  // الإجراء موجود في القائمة بس مفيش له case — يعني الكود اتنشر ناقص.
+  var hint = KNOWN_ACTIONS.indexOf(a) >= 0
+    ? ' — الكود المنشور نسخة قديمة. أعد النشر: Deploy → Manage deployments → New version'
+    : '';
+  return err_('BAD_REQUEST', 'إجراء غير معروف: ' + a + hint);
 }
 
 // ─────────────────────────────────────────────────────────── auth
