@@ -43,7 +43,7 @@ set status codes.
 the same Friday should both succeed; blocking on any concurrent edit would make the
 multi-admin requirement unusable.
 
-**`generateFriday` is idempotent.** Regenerating must never wipe an admin's work — the button
+**`generateDate` is idempotent.** Regenerating must never wipe an admin's work — the button
 will get clicked twice.
 
 **`setPreferences` replaces the whole list.** The UI is a multi-select and always knows the
@@ -62,7 +62,7 @@ a strength that is not there.
 The reference page uses them to choose between two searchable fields; here there is only one,
 so the control is reused for the filter the client actually needs.
 
-**A missing-phone counter and filter.** All 127 numbers are being typed by hand; this turns an
+**A missing-phone counter and filter.** All 131 numbers are being typed by hand; this turns an
 invisible backlog into a progress bar.
 
 **Unavailable khatibs are shown greyed and labelled with where they are booked, not hidden.**
@@ -102,7 +102,7 @@ findings were adopted, one rejected.
 
 **Adopted:**
 
-- `generateFriday` now takes the same lock as `saveSchedule`, with the existence check inside
+- `generateDate` now takes the same lock as `saveSchedule`, with the existence check inside
   it. Without it, two admins clicking `توليد الجمعة` simultaneously both see zero rows and both
   append 85 — 170 rows with duplicate ids.
 - Booleans are read through `String(v).toUpperCase() === 'TRUE'`. Sheets stores a `TRUE` cell
@@ -140,29 +140,61 @@ and rows created after the read being out of scope.
 avoiding preflight, the `/exec` 302 to `googleusercontent.com`, and `ContentService` having no
 status codes — were independently verified.
 
+## Answered by the client
+
+1. **Mosque identity is `(name, mujawra)`.** Names repeat across the city; a name never
+   repeats inside one zone. Enforced in `saveMosque_`.
+
+2. **The missing names were real preachers.** Four added as `K128`–`K131`:
+   `عاطف ابو الفضل`, `عبدالسلام محمود بسيوني`, `أسامة السيد`, `محمد حسن فنتاوي`.
+   **`اشرف` was deliberately not added** — it appears twice against an existing
+   `اشرف عبد القادر عبدالكريم`, so it reads as a truncated entry rather than a fifth person.
+   Adding it would create the exact duplicate-identity problem the rewrite exists to remove.
+   Confirm before adding.
+
+3. **Phone is mobile-only and optional.** Validated as 11 digits starting `01` *when
+   supplied*; blank is always accepted. The office is entering numbers gradually and a khatib
+   without one must still be schedulable.
+
+4. **The mosque lists on the khatib tab are preferences.** Recovered into
+   `context/preferences.csv` — 2,458 pairs across 102 khatibs, every label matched a known
+   mosque.
+
+   **One thing to check.** The distribution is bimodal and there is nothing in between:
+
+   | Mosques listed | Khatibs |
+   | --- | --- |
+   | 1–3 | 23 |
+   | 4–10 | 45 |
+   | 11–25 | 10 |
+   | 26–50 | **0** |
+   | 51+ | **24** |
+
+   78 khatibs sit at a median of 8, which reads like a genuine preference. 24 sit above 51 —
+   more than half the city. An empty band between the two groups usually means two different
+   kinds of data landed in the same columns: chosen preferences for most, and accumulated
+   assignment history for the rest. All of it is imported as instructed, but those 24 records
+   are worth spot-checking, because a khatib who "prefers" 80 mosques is un-rankable and the
+   dropdown ordering silently stops helping for them.
+
 ## Assumptions I had to make — check these
 
 These were genuinely ambiguous. Each one is a guess that could be wrong.
 
-1. **Every mosque holds exactly one Friday khutbah.** The model allows one preacher per mosque
-   per date. If any mosque runs two sittings, the composite id has to change — and it is
-   cheaper to know now than after data exists.
+1. **Every mosque holds exactly one Friday khutbah.** Still assumed. The client's answer
+   settled how mosques are *identified*, not whether one can hold two sittings. The composite
+   id `{date}_{mosque_id}` allows exactly one preacher per mosque per date. If a mosque ever
+   runs two, the key has to change — cheaper to know before data exists.
 
 2. **`مجاورة` is free text, not a fixed list.** Based on the real data mixing `مجاورة 1` with
    `الإسكان العائلي`, `120 فدان`, `دار مصر`, and `المنطقة الصناعية`.
-
-3. **The five names assigned in the old sheet but absent from the khatib roster** —
-   `عاطف ابو الفضل` (16 assignments), `عبدالسلام محمود بسيوني`, `أسامة السيد`, `اشرف`,
-   `محمد حسن فنتاوي` — are real preachers missing from the list, not typos. They are **not**
-   in `context/khatibs.csv`. Someone should confirm and add them; `عاطف ابو الفضل` in
-   particular, with 16 assignments, is unlikely to be a mistake.
 
 4. **The old sheet's `الاولي من شوال` column means Eid**, and the office wants Eid khutbahs
    scheduled here too. Now modelled via `date_type: special` with a required label. If the
    office in fact handles Eid entirely outside this system, the toggle is harmless — but
    confirm, because the reverse mistake is discovered on Eid morning.
 
-5. **`M001`–`M085` and `K001`–`K127`** follow the old sheet's row order, which carries no
+5. **`M001`–`M085` and `K001`–`K131`** follow the old sheet's row order, which carries no
    meaning. Fine as opaque keys, but they are not a ranking.
 
 6. **One spreadsheet per year is not assumed.** All assignments live in one tab indefinitely.

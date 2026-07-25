@@ -92,7 +92,7 @@ there is only one name field to search, so the tabs become a filter on type inst
 | `المساجد المفضلة` | comma-separated names, truncated with a `+3` chip |
 | actions | edit, deactivate |
 
-The missing-phone marker exists for one concrete reason: **all 127 phone numbers are being
+The missing-phone marker exists for one concrete reason: **all 131 phone numbers are being
 typed in by hand.** A counter above the table — `ناقص رقم الهاتف: 43` — is the progress bar
 for that job, and clicking it filters to exactly those rows.
 
@@ -107,7 +107,7 @@ Add/edit form:
 | `المساجد المفضلة` | multi-select with its own search | optional |
 | `نشط` | toggle | defaults on |
 
-PDF export renders the currently visible rows, not all 127 — the filter is the point.
+PDF export renders the currently visible rows, not all 131 — the filter is the point.
 
 ---
 

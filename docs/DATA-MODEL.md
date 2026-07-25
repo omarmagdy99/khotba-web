@@ -51,6 +51,11 @@ necessary but not sufficient; the script must re-assert the format on what it wr
 contains `الإسكان العائلي`, `120 فدان`, `المنطقة الصناعية`, `دار مصر`. Treat it as a free-text
 zone label, not an enum.
 
+**A mosque's identity is `(name, mujawra)`, not `name`.** The client confirmed this: the same
+mosque name recurs across the city — `الرحمن` exists in مجاورة 6, 9, 13 and 23; `التوحيد` in
+مجاورة 2, 8 and المنطقة الصناعية — but a name never repeats inside one zone. The API rejects a
+second mosque with the same normalized name *and* mujawra, and permits the name anywhere else.
+
 `permanent_khatib_id` is the mosque's standing preacher. **The API enforces that a given
 khatib id appears in this column at most once.**
 
@@ -75,8 +80,9 @@ plain text before importing anything.
 `type` is stored in English and rendered as `أساسي` / `متطوع`. It carries **no scheduling
 rule** — the client confirmed this explicitly. It exists to display and to filter.
 
-Seed from `context/khatibs.csv` — 127 rows, ids `K001`–`K127`. **`phone` is empty for all
-127** and will be typed in by hand.
+Seed from `context/khatibs.csv` — 127 rows, ids `K001`–`K131`. **`phone` is empty for all
+131** and will be typed in by hand. It is **optional** — the office is entering them
+gradually, and a khatib with no number must still be schedulable.
 
 ## `preferences`
 

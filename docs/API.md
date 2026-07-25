@@ -131,7 +131,21 @@ The client sends it back on save. That is the whole concurrency story for the sc
 
 ## Writes — mosques and khatibs
 
-`createMosque`, `updateMosque`, `deactivateMosque`, and the three matching khatib actions.
+| Action | Payload | Returns |
+| --- | --- | --- |
+| `createMosque` | `{ name, mujawra, address?, permanentKhatibId? }` | `{ id }` |
+| `updateMosque` | `{ id, name, mujawra, address?, permanentKhatibId?, active? }` | `{ id }` |
+| `deactivateMosque` | `{ id }` | `{ clearedAssignments, clearedPermanentAt }` |
+| `createKhatib` | `{ name, phone?, type, notes? }` | `{ id, similarTo }` |
+| `updateKhatib` | `{ id, name, phone?, type, notes?, active? }` | `{ id }` |
+| `deactivateKhatib` | `{ id }` | `{ clearedAssignments, clearedPermanentAt }` |
+| `getSettings` | `{}` | `{ settings }` — the publish window and ID counters |
+
+`createKhatib` returns `similarTo`: the ids of existing khatibs whose normalized name matches.
+The record is created regardless — two people genuinely can share a name — but the UI shows
+the match so a typo is caught at the moment it happens.
+
+`phone` is optional and stays optional; when present it must be 11 digits starting `01`.
 
 Deactivation, not deletion. A deleted mosque would orphan every historical assignment that
 referenced it. `active: FALSE` hides it from the scheduling screen and the public page while
@@ -141,7 +155,7 @@ keeping history readable.
 
 `deactivateKhatib` also, inside the lock —
 
-1. Clears `permanent_khatib_id` on any mosque pointing at them. Otherwise `generateFriday`
+1. Clears `permanent_khatib_id` on any mosque pointing at them. Otherwise `generateDate`
    keeps happily assigning a khatib who no longer serves.
 2. Finds every **future** assignment holding that `khatib_id`, sets it to `unassigned` with an
    empty `khatib_id`, and returns the affected dates and mosques so the UI can say
@@ -167,10 +181,10 @@ complete desired state, and a replace cannot drift out of sync the way increment
 
 ## Writes — scheduling
 
-### `generateFriday`
+### `generateDate`
 
 ```json
-{ "action": "generateFriday", "date": "2026-07-31" }
+{ "action": "generateDate", "date": "2026-07-31" }
 ```
 
 Creates one `assignments` row for every active mosque. A mosque with a `permanent_khatib_id`
@@ -245,7 +259,7 @@ Two caveats that are real:
 
 - Timestamps come from the server inside the lock, never from the client. A client clock would
   break the argument immediately.
-- Rows created after the read — by a concurrent `generateFriday` — are not covered by the
+- Rows created after the read — by a concurrent `generateDate` — are not covered by the
   version. This is harmless: the client cannot submit changes for mosques it never saw.
 
 ### `publishRange`

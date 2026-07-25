@@ -18,10 +18,14 @@ and every date column as **plain text before importing anything** — this is th
 easy to skip and expensive to undo, because Sheets will strip the leading zero from
 `01001234567` and reinterpret `2026-07-31` by locale.
 
-Import `context/mosques.csv` (85 rows) and `context/khatibs.csv` (127 rows). Create one admin
-account per staff member.
+Import `context/mosques.csv` (85 rows), `context/khatibs.csv` (131 rows), and
+`context/preferences.csv` (2,458 rows). Create one admin account per staff member.
 
-**Done when:** all seven tabs exist, 85 mosques and 127 khatibs are present, and a spot-check of
+The preferences were recovered from the old sheet's khatib tab, where each khatib's chosen
+mosques were picked from dropdowns. Every one of the 2,458 labels resolved to a known mosque —
+zero unmatched.
+
+**Done when:** all seven tabs exist, 85 mosques and 131 khatibs are present, and a spot-check of
 five khatib names matches the CSV exactly — no trailing spaces, no mangled Arabic.
 
 ### Phase 1 — API core
@@ -41,14 +45,14 @@ a browser, not in the Apps Script editor.
 Full CRUD for both, plus preferences and the permanent-khatib field with its uniqueness check.
 
 **Done when:** a staff member can add a mosque and a khatib end to end, and the missing-phone
-counter on the khatib screen reads 127.
+counter on the khatib screen reads 131.
 
-This is also when the phone-number data entry starts — it is 127 manual lookups and it does
+This is also when the phone-number data entry starts — it is 131 manual lookups and it does
 not block anything else, so it should run in parallel with Phases 3 and 4.
 
 ### Phase 3 — Scheduling
 
-`generateFriday`, `saveSchedule` with its lock and its double-booking check, the availability
+`generateDate`, `saveSchedule` with its lock and its double-booking check, the availability
 dropdown, and the remaining-empty counter.
 
 **Done when:** an admin can generate a Friday, see permanent khatibs pre-filled, assign the
@@ -82,10 +86,10 @@ Set the old sheet to view-only, announce the public URL, and stop dual entry.
 
 Not negotiable:
 
-1. **All 127 phone numbers entered.** The old sheet lost them entirely; if the new system
+1. **All 131 phone numbers entered.** The old sheet lost them entirely; if the new system
    launches without them, the office is worse off than before on that one axis.
 2. **Every mosque with a standing preacher has `permanent_khatib_id` set.** Otherwise
-   `generateFriday` fills nothing and every Friday is 85 manual choices.
+   `generateDate` fills nothing and every Friday is 85 manual choices.
 3. **Two Fridays produced in parallel and matched.**
 4. **Every staff member has their own account and has logged in at least once.**
 5. **Someone other than the builder has generated and saved a Friday unaided.**
@@ -99,7 +103,7 @@ hypothetical — the office has multiple staff. `LockService` plus the `version`
 load, saves queue. At this scale that is invisible. It is called out so nobody later
 diagnoses a slow save as a bug.
 
-**The 127 phone numbers.** The largest chunk of pure human effort in the project, and it is
+**The 131 phone numbers.** The largest chunk of pure human effort in the project, and it is
 outside anyone's control. Start it in Phase 2 and track it with the on-screen counter. If it
 is still incomplete at Phase 5, launch anyway — a missing phone number does not block
 scheduling — but do not call the migration finished.

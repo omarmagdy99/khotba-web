@@ -2,72 +2,65 @@
 
 Written for someone who has not done this before. Follow it in order.
 
-## 1. Create the spreadsheet
+## 1. Create the spreadsheet and run `setup`
 
 1. At [sheets.new](https://sheets.new), create a spreadsheet named `أوقاف 15 مايو — الخطب`.
-2. Create seven tabs named exactly: `mosques`, `khatibs`, `preferences`, `assignments`,
-   `users`, `sessions`, `settings`. English names, lowercase — the script refers to them by
-   these strings.
-3. In each tab, type the header row from `DATA-MODEL.md` into row 1.
+2. **Extensions → Apps Script**. This creates a *bound* project, which is what you want —
+   `SpreadsheetApp.getActive()` then resolves without an ID.
+3. Rename the project `أوقاف 15 مايو — API`.
+4. Delete the placeholder `myFunction`, paste the whole of `apps-script/Code.gs`, and save.
+5. Pick **`setup`** from the function dropdown at the top and press **Run**. Authorise when
+   Google asks.
 
-### Format columns as text before importing anything
+`setup` creates all seven tabs with their headers, applies plain-text formatting to every
+column that needs it, hides `users` and `sessions`, seeds the ID counters and the publish
+window, and removes the empty default sheet.
 
-This step cannot be done afterwards. Select each of these columns and set
-**Format → Number → Plain text**:
+It is safe to run again. It skips any tab that already exists and never touches data.
 
-- `mosques`: `id`, `permanent_khatib_id`
-- `khatibs`: `id`, `phone`
-- `assignments`: `id`, `date`, `mosque_id`, `khatib_id`, `date_type`, `label`
-- `preferences`: both columns
-- `settings`: `value`
-
-Skipping it means `01001234567` is stored as `1001234567` and `2026-07-31` becomes a locale-
-dependent date object. Both are silent.
+**Do not create the tabs by hand.** The plain-text formatting is the part that matters, and
+it cannot be applied retroactively — `01001234567` would already have become `1001234567`.
 
 ## 2. Seed the data
 
-**File → Import → Upload**, choose `context/mosques.csv`, and select **Append to current
-sheet** with the `mosques` tab active. Repeat for `context/khatibs.csv` into `khatibs`.
+With the tabs in place, **File → Import → Upload**. Import each CSV with
+**Append to current sheet**, having first clicked into the matching tab:
 
-Both files are UTF-8 with a BOM so Sheets detects Arabic correctly. If names arrive as
-`Ø£Ø­Ù…Ø¯`, the encoding was overridden — undo the import and retry, choosing UTF-8 explicitly.
+| File | Tab | Rows |
+| --- | --- | --- |
+| `context/mosques.csv` | `mosques` | 85 |
+| `context/khatibs.csv` | `khatibs` | 131 |
+| `context/preferences.csv` | `preferences` | 2,458 |
 
-Then fill the columns the CSVs do not carry: `active` = `TRUE` and `created_at` for every row,
-and `type` for every khatib (`primary` or `volunteer`).
+All three are UTF-8 with a BOM so Sheets detects Arabic correctly. If names arrive as
+`Ø£Ø­Ù…Ø¯`, the encoding was overridden — undo and retry, choosing UTF-8 explicitly.
+
+Then fill the columns the CSVs do not carry: `active` = `TRUE` and `created_at` for every
+mosque and khatib row, and `type` for every khatib (`primary` or `volunteer`).
 
 Spot-check five khatib names against the CSV. Trailing spaces were stripped during export; if
-any reappear, the import re-added them and the availability check will misbehave later.
+any reappear, the import re-added them and search will misbehave later.
 
 ## 3. Create the admin accounts
 
 Passwords are stored salted and hashed, so they cannot be typed into the sheet directly.
+`Code.gs` already contains a `createUser` function for this.
 
-In the Apps Script editor (next step), run this once per staff member, then delete it:
+Edit the three constants at the top of it, run it, and repeat for each staff member:
 
 ```js
-function createUser() {
-  const username = 'fatma';
-  const displayName = 'فاطمة عبد الله';
-  const password = 'CHANGE-ME';
-
-  const salt = Utilities.getUuid().replace(/-/g, '');
-  const hash = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, salt + password)
-    .map(b => ((b & 0xff) + 0x100).toString(16).slice(1)).join('');
-
-  SpreadsheetApp.getActive().getSheetByName('users')
-    .appendRow([username, displayName, hash, salt, 'TRUE', new Date().toISOString()]);
-}
+var username    = 'fatma';
+var displayName = 'فاطمة عبد الله';
+var password    = 'CHANGE-ME';
 ```
 
-Give each person a different password and have them tell you it, or set one and require a
-change on first login. Do not commit any password to the repository.
+It refuses to run while the password is still `CHANGE-ME`. Blank the values again when you
+are done, and never commit a real password.
 
-## 4. Create the Apps Script project
+## 4. Optional: nightly session cleanup
 
-1. In the spreadsheet: **Extensions → Apps Script**. This creates a *bound* project, which
-   is what you want — `SpreadsheetApp.getActive()` then resolves without an ID.
-2. Rename it `أوقاف 15 مايو — API`.
-3. Paste the server code. Keep it in one `Code.gs` unless it grows past a few hundred lines.
+**Triggers → Add trigger →** function `purgeSessions`, time-driven, day timer. Not required —
+expired tokens are rejected whether or not the row still exists — it just keeps the tab small.
 
 ## 5. Deploy as a Web App
 
