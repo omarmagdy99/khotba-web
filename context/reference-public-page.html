@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
+    <title>دليل مساجد 15 مايو</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f0f4f8;
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+        }
+        
+        .container {
+            background-color: #ffffff;
+            padding: 20px;
+            border-radius: 24px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+            width: 100%;
+            max-width: 900px;
+            margin: 10px auto;
+        }
+        
+        h1 {
+            color: #1e3c5c;
+            text-align: center;
+            margin-bottom: 20px;
+            font-size: 1.8em;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+        
+        .search-tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            background: #f1f5f9;
+            padding: 8px;
+            border-radius: 50px;
+        }
+        
+        .tab-btn {
+            flex: 1;
+            padding: 12px 16px;
+            border: none;
+            border-radius: 40px;
+            background: transparent;
+            color: #475569;
+            font-weight: 600;
+            font-size: 1em;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .tab-btn.active {
+            background: #1e3c5c;
+            color: white;
+            box-shadow: 0 4px 10px rgba(30, 60, 92, 0.3);
+        }
+        
+        .search-box {
+            position: relative;
+            margin-bottom: 20px;
+        }
+        
+        .search-icon {
+            position: absolute;
+            right: 16px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #94a3b8;
+            font-size: 1.2em;
+            pointer-events: none;
+        }
+        
+        .search-input {
+            width: 100%;
+            padding: 16px 50px;
+            border: 2px solid #e2e8f0;
+            border-radius: 50px;
+            font-size: 16px;
+            transition: all 0.3s;
+            background: #f8fafc;
+        }
+        
+        .search-input:focus {
+            border-color: #3498db;
+            outline: none;
+            background: white;
+            box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+        }
+        
+        .clear-btn {
+            position: absolute;
+            left: 16px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            font-size: 1.2em;
+            color: #94a3b8;
+            cursor: pointer;
+            padding: 5px;
+            display: none;
+        }
+        
+        .clear-btn.show {
+            display: block;
+        }
+        
+        .stats-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding: 12px 20px;
+            background: #e8f4f8;
+            border-radius: 50px;
+            font-size: 0.95em;
+        }
+        
+        .total-badge {
+            background: white;
+            padding: 5px 15px;
+            border-radius: 30px;
+            font-weight: 600;
+            color: #1e3c5c;
+        }
+        
+        .reset-btn {
+            background: white;
+            border: none;
+            color: #1e3c5c;
+            font-weight: 600;
+            padding: 8px 20px;
+            border-radius: 30px;
+            cursor: pointer;
+            transition: all 0.3s;
+            border: 1px solid #cbd5e1;
+        }
+        
+        .reset-btn:hover {
+            background: #1e3c5c;
+            color: white;
+            border-color: #1e3c5c;
+        }
+        
+        .pdf-btn {
+            background: white;
+            border: none;
+            color: #c0392b;
+            font-weight: 600;
+            padding: 8px 20px;
+            border-radius: 30px;
+            cursor: pointer;
+            transition: all 0.3s;
+            border: 1px solid #c0392b;
+            margin-right: 10px;
+        }
+        
+        .pdf-btn:hover {
+            background: #c0392b;
+            color: white;
+        }
+        
+        .table-container {
+            background: white;
+            border-radius: 20px;
+            overflow: hidden;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+            border: 1px solid #e2e8f0;
+        }
+        
+        .table-header {
+            display: flex;
+            background: linear-gradient(135deg, #1e3c5c, #2c5282);
+            color: white;
+            padding: 16px;
+            font-weight: 600;
+            font-size: 1.1em;
+        }
+        
+        .table-body {
+            max-height: 500px;
+            overflow-y: auto;
+        }
+        
+        .table-row {
+            display: flex;
+            padding: 14px 16px;
+            border-bottom: 1px solid #e2e8f0;
+            transition: background-color 0.2s;
+            background: white;
+        }
+        
+        .table-row:last-child {
+            border-bottom: none;
+        }
+        
+        .table-row:hover {
+            background: #f1f5f9;
+        }
+        
+        .col-mosque {
+            flex: 2;
+            padding-left: 10px;
+            font-weight: 500;
+        }
+        
+        .col-area {
+            flex: 1.5;
+            padding: 0 10px;
+        }
+        
+        .col-preacher {
+            flex: 2;
+            padding-right: 10px;
+            font-weight: 500;
+            color: #1e3c5c;
+        }
+        
+        .area-badge {
+            background: #e8f4f8;
+            color: #1e3c5c;
+            padding: 4px 12px;
+            border-radius: 30px;
+            font-size: 0.85em;
+            display: inline-block;
+            font-weight: 500;
+        }
+        
+        .loading-state, .error-state, .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #64748b;
+            background: #f8fafc;
+            border-radius: 20px;
+            margin: 20px 0;
+        }
+        
+        .loading-state .spinner {
+            font-size: 3em;
+            margin-bottom: 15px;
+            animation: spin 2s linear infinite;
+        }
+        
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        
+        .error-state {
+            color: #991b1b;
+            background: #fee2e2;
+        }
+        
+        .footer-note {
+            margin-top: 20px;
+            text-align: center;
+            color: #64748b;
+            font-size: 0.9em;
+        }
+        
+        @media (max-width: 600px) {
+            .container { padding: 15px; }
+            h1 { font-size: 1.5em; }
+            .table-header { padding: 12px; font-size: 0.95em; }
+            .table-row { padding: 12px; font-size: 0.9em; }
+            .col-mosque, .col-area, .col-preacher { padding: 0 5px; }
+            .pdf-btn, .reset-btn { padding: 8px 12px; font-size: 0.9em; }
+        }
+        
+        /* تنسيق خاص للطباعة و PDF */
+        @media print {
+            .search-tabs, .search-box, .stats-bar, .footer-note {
+                display: none;
+            }
+            .table-container {
+                box-shadow: none;
+                border: 1px solid #000;
+            }
+        }
+    </style>
+    
+    <!-- إضافة المكتبات اللازمة للـ PDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <h1>
+            <span>🕌</span>
+            دليل مساجد 15 مايو
+            <span>📍</span>
+        </h1>
+        
+        <div class="search-tabs">
+            <button class="tab-btn active" data-tab="mosque">🔍 بحث باسم المسجد</button>
+            <button class="tab-btn" data-tab="preacher">🎙️ بحث باسم الخطيب</button>
+        </div>
+        
+        <div class="search-box">
+            <span class="search-icon">🔍</span>
+            <input type="text" class="search-input" id="searchInput" 
+                   placeholder="ابحث باسم المسجد..." autocomplete="off">
+            <button class="clear-btn" id="clearBtn">✕</button>
+        </div>
+        
+        <div class="stats-bar">
+            <span>📊 إجمالي المساجد: <strong id="totalCount">0</strong></span>
+            <span class="total-badge" id="visibleCount">0</span>
+            <div style="display: flex; gap: 10px;">
+                <button class="pdf-btn" id="pdfBtn">📄 استخراج PDF</button>
+                <button class="reset-btn" id="resetBtn">🔄 عرض الكل</button>
+            </div>
+        </div>
+        
+        <!-- هذا الـ div هو اللي هنصوره لعمل PDF -->
+        <div id="pdf-content">
+            <div id="results">
+                <div class="loading-state">
+                    <div class="spinner">⏳</div>
+                    <p>جاري تحميل البيانات...</p>
+                </div>
+            </div>
+        </div>
+        
+        <div class="footer-note">
+            * البحث يتم في البيانات المحملة - سريع جداً
+        </div>
+    </div>
+
+    <script>
+        // تكوين ثابت
+        const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxGfd9nD_Iiy4Mhv-Sxy9kSzBCQFpr40FVtnmap5aESTqJsZZcDjo5wLNNfOZ5TX9Y2Gg/exec';
+        
+        // عناصر الصفحة
+        const searchInput = document.getElementById('searchInput');
+        const clearBtn = document.getElementById('clearBtn');
+        const resetBtn = document.getElementById('resetBtn');
+        const pdfBtn = document.getElementById('pdfBtn');
+        const resultsDiv = document.getElementById('results');
+        const pdfContent = document.getElementById('pdf-content');
+        const totalCountSpan = document.getElementById('totalCount');
+        const visibleCountSpan = document.getElementById('visibleCount');
+        const tabBtns = document.querySelectorAll('.tab-btn');
+
+        // متغيرات التطبيق
+        let currentTab = 'mosque';
+        let allData = [];
+        let filteredData = [];
+
+        // دالة تنقية النص للبحث الذكي
+        function normalizeText(text) {
+            if (!text || text === 'غير محدد') return '';
+            
+            return text.toString()
+                .toLowerCase()
+                .replace(/[أإآ]/g, 'ا')
+                .replace(/[ى]/g, 'ي')
+                .replace(/[ة]/g, 'ه')
+                .replace(/[ث]/g, 'س')
+                .replace(/[ذ]/g, 'ز')
+                .replace(/[ؤ]/g, 'و')
+                .replace(/[ئ]/g, 'ي')
+                .replace(/\s+/g, ' ')
+                .trim();
+        }
+
+        // دالة البحث (من أول حرف)
+        function filterData(searchText) {
+            if (!searchText || searchText.trim() === '') {
+                return allData;
+            }
+            
+            const normalizedSearch = normalizeText(searchText);
+            
+            return allData.filter(item => {
+                const fieldToSearch = (currentTab === 'mosque') ? item.mosque : item.preacher;
+                const normalizedField = normalizeText(fieldToSearch);
+                return normalizedField.includes(normalizedSearch);
+            });
+        }
+
+        // عرض الجدول
+        function displayTable(data) {
+            visibleCountSpan.textContent = data.length;
+            
+            if (!data || data.length === 0) {
+                resultsDiv.innerHTML = `
+                    <div class="empty-state">
+                        <span style="font-size: 3em;">😕</span>
+                        <p>لا توجد نتائج للبحث</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            let tableHTML = `
+                <div class="table-container">
+                    <div class="table-header">
+                        <div class="col-mosque">🕌 المسجد</div>
+                        <div class="col-area">📍 المجاورة</div>
+                        <div class="col-area">🎙️ الخطيب</div>
+                    </div>
+                    <div class="table-body">
+            `;
+            
+            data.forEach(item => {
+                tableHTML += `
+                    <div class="table-row">
+                        <div class="col-mosque">${item.mosque || 'غير محدد'}</div>
+                        <div class="col-area">
+                            <span class="area-badge">${item.area || 'غير محددة'}</span>
+                        </div>
+                        <div class="col-preacher">${item.preacher || 'غير محدد'}</div>
+                    </div>
+                `;
+            });
+            
+            tableHTML += `
+                    </div>
+                </div>
+            `;
+            
+            resultsDiv.innerHTML = tableHTML;
+        }
+
+        // تنفيذ البحث
+        function performSearch() {
+            const searchTerm = searchInput.value;
+            
+            if (searchTerm) {
+                clearBtn.classList.add('show');
+            } else {
+                clearBtn.classList.remove('show');
+            }
+            
+            filteredData = filterData(searchTerm);
+            displayTable(filteredData);
+        }
+
+        // جلب البيانات من Google Sheets
+        async function fetchData() {
+            try {
+                const response = await fetch(APPS_SCRIPT_URL);
+                
+                if (!response.ok) {
+                    throw new Error('فشل الاتصال بالسيرفر');
+                }
+                
+                const data = await response.json();
+                
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                
+                allData = [];
+                
+                if (data.mayo && Array.isArray(data.mayo) && data.mayo.length > 0) {
+                    for (let i = 1; i < data.mayo.length; i++) {
+                        const row = data.mayo[i];
+                        
+                        if (!row || row.length < 3) continue;
+                        
+                        const mosque = row[0]?.toString().trim() || '';
+                        const area = row[1]?.toString().trim() || '';
+                        const preacher = row[2]?.toString().trim() || '';
+                        
+                        if (mosque && preacher) {
+                            allData.push({ mosque, area, preacher });
+                        }
+                    }
+                }
+                
+                totalCountSpan.textContent = allData.length;
+                filteredData = allData;
+                displayTable(allData);
+                
+            } catch (error) {
+                console.error('خطأ:', error);
+                resultsDiv.innerHTML = `
+                    <div class="error-state">
+                        <span style="font-size: 3em;">❌</span>
+                        <p>حدث خطأ في تحميل البيانات</p>
+                        <p style="font-size: 0.9em; margin-top: 10px;">${error.message}</p>
+                        <button onclick="location.reload()" style="margin-top: 20px; padding: 10px 30px; background: #1e3c5c; color: white; border: none; border-radius: 30px; cursor: pointer;">
+                            🔄 إعادة المحاولة
+                        </button>
+                    </div>
+                `;
+            }
+        }
+
+        // استخراج PDF بشكل منظم
+        async function exportToPDF() {
+            try {
+                // تغيير نص الزر مؤقتاً
+                const originalText = pdfBtn.textContent;
+                pdfBtn.textContent = '⏳ جاري التحميل...';
+                pdfBtn.disabled = true;
+                
+                // إنشاء عنصر مؤقت للتصدير
+                const tempDiv = document.createElement('div');
+                tempDiv.style.padding = '30px';
+                tempDiv.style.background = 'white';
+                tempDiv.style.fontFamily = 'Arial, sans-serif';
+                tempDiv.style.direction = 'rtl';
+                tempDiv.style.width = '800px';
+                
+                // عنوان التقرير
+                tempDiv.innerHTML = `
+                    <div style="text-align: center; margin-bottom: 20px;">
+                        <h1 style="color: #1e3c5c; font-size: 24px; margin: 0;">🕌 دليل مساجد 15 مايو</h1>
+                        <p style="color: #666; margin: 5px 0;">تاريخ التقرير: ${new Date().toLocaleDateString('ar-EG')}</p>
+                        <p style="color: #1e3c5c; font-weight: bold;">إجمالي المساجد: ${filteredData.length}</p>
+                    </div>
+                `;
+                
+                // إنشاء جدول منظم
+                let tableHTML = `
+                    <table style="width: 100%; border-collapse: collapse; margin-top: 20px; direction: rtl;">
+                        <thead>
+                            <tr style="background: #1e3c5c; color: white;">
+                                <th style="padding: 12px; border: 1px solid #2c5282; text-align: right; font-size: 14px;">المسجد</th>
+                                <th style="padding: 12px; border: 1px solid #2c5282; text-align: right; font-size: 14px;">المجاورة</th>
+                                <th style="padding: 12px; border: 1px solid #2c5282; text-align: right; font-size: 14px;">الخطيب</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
+                
+                filteredData.forEach((item, index) => {
+                    const bgColor = index % 2 === 0 ? '#ffffff' : '#f8fafc';
+                    tableHTML += `
+                        <tr style="background: ${bgColor};">
+                            <td style="padding: 10px; border: 1px solid #e2e8f0; text-align: right;">${item.mosque}</td>
+                            <td style="padding: 10px; border: 1px solid #e2e8f0; text-align: right;">${item.area}</td>
+                            <td style="padding: 10px; border: 1px solid #e2e8f0; text-align: right;">${item.preacher}</td>
+                        </tr>
+                    `;
+                });
+                
+                tableHTML += `
+                        </tbody>
+                    </table>
+                `;
+                
+                tempDiv.innerHTML += tableHTML;
+                
+                // إضافة تذييل
+                tempDiv.innerHTML += `
+                    <div style="text-align: center; margin-top: 30px; color: #94a3b8; font-size: 12px;">
+                        تم إنشاء هذا التقرير بواسطة نظام دليل مساجد 15 مايو
+                    </div>
+                `;
+                
+                // إضافة العنصر مؤقتاً للصفحة
+                document.body.appendChild(tempDiv);
+                
+                // تحويل العنصر إلى Canvas بدقة عالية
+                const canvas = await html2canvas(tempDiv, {
+                    scale: 2,
+                    backgroundColor: '#ffffff',
+                    logging: false,
+                    windowWidth: 1000
+                });
+                
+                // إزالة العنصر المؤقت
+                document.body.removeChild(tempDiv);
+                
+                // إنشاء PDF بحجم A4 أفقي
+                const { jsPDF } = window.jspdf;
+                const pdf = new jsPDF({
+                    orientation: 'landscape',
+                    unit: 'mm',
+                    format: 'a4'
+                });
+                
+                const imgData = canvas.toDataURL('image/png');
+                const pdfWidth = pdf.internal.pageSize.getWidth();
+                const pdfHeight = pdf.internal.pageSize.getHeight();
+                const imgWidth = canvas.width;
+                const imgHeight = canvas.height;
+                const ratio = Math.min(pdfWidth / imgWidth, pdfHeight / imgHeight);
+                const width = imgWidth * ratio;
+                const height = imgHeight * ratio;
+                
+                pdf.addImage(imgData, 'PNG', (pdfWidth - width) / 2, 10, width, height);
+                
+                // حفظ الملف
+                const date = new Date().toLocaleDateString('ar-EG').replace(/\//g, '-');
+                pdf.save(`مساجد_15_مايو_${date}.pdf`);
+                
+                // إعادة الزر لحالته
+                pdfBtn.textContent = originalText;
+                pdfBtn.disabled = false;
+                
+                // رسالة نجاح
+                alert('✅ تم استخراج PDF بنجاح');
+                
+            } catch (error) {
+                console.error('خطأ في PDF:', error);
+                alert('❌ فشل استخراج PDF، يرجى المحاولة مرة أخرى');
+                
+                // إعادة الزر لحالته
+                pdfBtn.textContent = '📄 استخراج PDF';
+                pdfBtn.disabled = false;
+            }
+        }
+
+        // أحداث المستخدم
+        tabBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                tabBtns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentTab = btn.dataset.tab;
+                searchInput.placeholder = (currentTab === 'mosque') ? 'ابحث باسم المسجد...' : 'ابحث باسم الخطيب...';
+                performSearch();
+            });
+        });
+
+        searchInput.addEventListener('input', performSearch);
+
+        clearBtn.addEventListener('click', () => {
+            searchInput.value = '';
+            clearBtn.classList.remove('show');
+            performSearch();
+            searchInput.focus();
+        });
+
+        resetBtn.addEventListener('click', () => {
+            searchInput.value = '';
+            clearBtn.classList.remove('show');
+            filteredData = allData;
+            displayTable(allData);
+            searchInput.focus();
+        });
+
+        pdfBtn.addEventListener('click', exportToPDF);
+
+        searchInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+            }
+        });
+
+        // بدأ التطبيق
+        fetchData();
+    </script>
+</body>
+</html>
