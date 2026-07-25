@@ -304,6 +304,11 @@
      * وأخيرًا المحجوزين — بيظهروا رمادي ومكتوب محجوزين فين، مش متشالين،
      * عشان الموظف يفهم ليه مش عارف ياخد الشخص ده.
      */
+    /**
+     * الترتيب: الخطيب الثابت أولاً، ثم الخطباء الذين اختاروا هذا المسجد في رغباتهم (مقترح)،
+     * ثم باقي الخطباء المتاحين، وأخيراً الخطباء المسندون إلى مسجد آخر في نفس الجمعة
+     * (يظهرون بالأحمر ومتاح اختيارهم لنقلهم تلقائياً من المسجد السابق).
+     */
     function selectHtml(r, e) {
       var m = state.mosques[r.mosqueId] || {};
       var booked = bookedMap(r.mosqueId);
@@ -313,16 +318,21 @@
       state.khatibs.forEach(function (k) {
         var where = booked[k.id];
         var count = state.loadCount[k.id] || 0;
-        var label = k.name + (count ? ' (' + count + ')' : '');
+        var labelCount = count ? ' (' + count + ')' : '';
+
         if (where) {
           var wm = state.mosques[where] || {};
-          groups[3].push({ id: k.id, label: k.name + ' — محجوز: ' + (wm.name || '') + ' ' + (wm.mujawra || ''), off: true });
+          var mosqueName = wm.name || 'مسجد آخر';
+          groups[3].push({
+            id: k.id,
+            label: k.name + labelCount + ' — ⚠️ مسند إلى: ' + mosqueName
+          });
         } else if (k.id === permanent) {
-          groups[0].push({ id: k.id, label: '★ ' + label + ' — خطيب ثابت' });
+          groups[0].push({ id: k.id, label: '★ ' + k.name + labelCount + ' — خطيب ثابت' });
         } else if ((state.prefsByKhatib[k.id] || new Set()).has(r.mosqueId)) {
-          groups[1].push({ id: k.id, label: '♦ ' + label });
+          groups[1].push({ id: k.id, label: '♦ ' + k.name + labelCount + ' — (مستهدف/مقترح)' });
         } else {
-          groups[2].push({ id: k.id, label: label });
+          groups[2].push({ id: k.id, label: k.name + labelCount });
         }
       });
 
@@ -330,8 +340,7 @@
       groups.forEach(function (g) {
         g.forEach(function (o) {
           opts += '<option value="' + esc(o.id) + '"' +
-            (o.id === e.khatibId ? ' selected' : '') +
-            (o.off ? ' disabled' : '') + '>' + esc(o.label) + '</option>';
+            (o.id === e.khatibId ? ' selected' : '') + '>' + esc(o.label) + '</option>';
         });
       });
 
@@ -387,19 +396,61 @@
             controlInput: null,
             plugins: ['dropdown_input'],
             direction: 'rtl',
+            render: {
+              option: function(data, escape) {
+                var text = escape(data.text);
+                if (text.indexOf('مسند إلى:') >= 0) {
+                  var parts = text.split('—');
+                  var namePart = parts[0];
+                  var msgPart = parts.slice(1).join('—');
+                  return '<div style="display:flex;justify-content:space-between;align-items:center;width:100%">' +
+                    '<span>' + namePart + '</span>' +
+                    '<span style="color:#dc2626;font-weight:bold;font-size:0.85em;background:#fee2e2;padding:2px 8px;border-radius:12px;margin-right:6px">' + msgPart + '</span>' +
+                  '</div>';
+                } else if (text.indexOf('مستهدف') >= 0 || text.indexOf('♦') >= 0) {
+                  return '<div style="display:flex;justify-content:space-between;align-items:center;width:100%">' +
+                    '<span style="color:#0284c7;font-weight:600">' + text + '</span>' +
+                    '<span style="color:#0284c7;font-size:0.78em;background:#e0f2fe;padding:2px 6px;border-radius:10px;font-weight:bold;margin-right:6px">مقترح لهذا المسجد</span>' +
+                  '</div>';
+                } else if (text.indexOf('★') >= 0) {
+                  return '<div style="color:#b45309;font-weight:bold">' + text + '</div>';
+                }
+                return '<div>' + text + '</div>';
+              },
+              item: function(data, escape) {
+                var text = escape(data.text);
+                if (text.indexOf('مسند إلى:') >= 0) {
+                  return '<div><span style="color:#dc2626;font-weight:bold">' + text + '</span></div>';
+                } else if (text.indexOf('مستهدف') >= 0 || text.indexOf('♦') >= 0) {
+                  return '<div><span style="color:#0284c7;font-weight:bold">' + text + '</span></div>';
+                }
+                return '<div>' + text + '</div>';
+              }
+            },
             onChange: function (val) {
               var id = sel.dataset.mosque;
               var row = state.rows.filter(function (r) { return r.mosqueId === id; })[0];
               var cur = effective(row);
+
+              // إذا تم اختيار خطيب وكان محجوزاً في مسجد آخر بنفس الجمعة، يتم إلغاء إسناده من المسجد السابق
+              if (val) {
+                var booked = bookedMap(id);
+                var oldMosqueId = booked[val];
+                if (oldMosqueId && oldMosqueId !== id) {
+                  var oldRow = state.rows.filter(function (r) { return r.mosqueId === oldMosqueId; })[0];
+                  if (oldRow) {
+                    state.dirty[oldMosqueId] = { khatibId: '', status: 'unassigned' };
+                    if (state.dirty[oldMosqueId].khatibId === oldRow.khatibId && state.dirty[oldMosqueId].status === oldRow.status) {
+                      delete state.dirty[oldMosqueId];
+                    }
+                  }
+                }
+              }
+
               state.dirty[id] = { khatibId: val, status: val ? (cur.status === 'excused' ? 'excused' : 'confirmed') : 'unassigned' };
               if (state.dirty[id].khatibId === row.khatibId && state.dirty[id].status === row.status) delete state.dirty[id];
               
-              var rowEl = sel.closest('.table-row');
-              if (rowEl) {
-                if (state.dirty[id]) rowEl.classList.add('dirty');
-                else rowEl.classList.remove('dirty');
-              }
-              updateSaveButtonStatus();
+              render();
             }
           });
           window._tomSelectInstances.push(ts);
@@ -408,6 +459,21 @@
             var id = this.dataset.mosque;
             var row = state.rows.filter(function (r) { return r.mosqueId === id; })[0];
             var cur = effective(row);
+            
+            if (this.value) {
+              var booked = bookedMap(id);
+              var oldMosqueId = booked[this.value];
+              if (oldMosqueId && oldMosqueId !== id) {
+                var oldRow = state.rows.filter(function (r) { return r.mosqueId === oldMosqueId; })[0];
+                if (oldRow) {
+                  state.dirty[oldMosqueId] = { khatibId: '', status: 'unassigned' };
+                  if (state.dirty[oldMosqueId].khatibId === oldRow.khatibId && state.dirty[oldMosqueId].status === oldRow.status) {
+                    delete state.dirty[oldMosqueId];
+                  }
+                }
+              }
+            }
+
             state.dirty[id] = { khatibId: this.value, status: this.value ? (cur.status === 'excused' ? 'excused' : 'confirmed') : 'unassigned' };
             if (state.dirty[id].khatibId === row.khatibId && state.dirty[id].status === row.status) delete state.dirty[id];
             render();
