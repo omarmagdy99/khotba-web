@@ -92,7 +92,8 @@ function clearToken() { clearClientCache(); localStorage.removeItem('awqaf_token
 function getUserName() { return localStorage.getItem('awqaf_name') || ''; }
 
 function goLogin() {
-  if (!/index\.html$|\/$/.test(location.pathname)) location.href = 'index.html';
+  // Cloudflare بيقدّم الصفحات من غير .html (‎/index)، فلازم نتعرّف على الشكلين.
+  if (!/(^|\/)(index(\.html)?)?$/.test(location.pathname)) location.href = 'index.html';
 }
 
 /** تُستدعى في أول كل صفحة محمية. بترجّع false لو اتحوّل للدخول. */
