@@ -115,19 +115,30 @@ export async function logout_(db, b) {
 export async function auth_(db, token) {
   if (!token) return null;
 
-  const s = await one(db, 'SELECT * FROM sessions WHERE token = ?', token);
-  if (!s) return null;
+  const row = await one(db, `
+    SELECT u.username, u.display_name, u.password_hash, u.salt, u.active, u.created_at, s.expires_at
+    FROM sessions s
+    JOIN users u ON u.username = s.username
+    WHERE s.token = ?
+  `, token);
+  if (!row) return null;
 
-  if (new Date(s.expires_at) < new Date()) {
+  if (new Date(row.expires_at) < new Date()) {
     // حذف الجلسة المنتهية بشكل غير متزامن
     run(db, 'DELETE FROM sessions WHERE token = ?', token).catch(() => {});
     return null;
   }
 
-  const u = await one(db, 'SELECT * FROM users WHERE username = ?', s.username);
-  if (!u || !isTrue_(u.active)) return null;
+  if (!isTrue_(row.active)) return null;
 
-  return u;
+  return {
+    username: row.username,
+    display_name: row.display_name,
+    password_hash: row.password_hash,
+    salt: row.salt,
+    active: row.active,
+    created_at: row.created_at,
+  };
 }
 
 export function whoami_(user) {

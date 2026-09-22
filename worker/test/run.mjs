@@ -711,6 +711,21 @@ async function main() {
       const userRow = d1Query("SELECT password_hash FROM users WHERE username = 'testadmin'")[0];
       assert(userRow && userRow.password_hash.startsWith('pbkdf2$10000$'), `changePassword must write pbkdf2$10000$, got ${userRow?.password_hash}`);
     }),
+
+    test('Scenario 13: two public GETs return identical JSON (Item 4)', async () => {
+      const publicUrl = `${BASE_URL}/?date=${fridayDate}`;
+      const res1 = await fetch(publicUrl);
+      const json1 = await res1.json();
+      assert(res1.ok && json1.ok, 'first public GET must succeed');
+
+      const res2 = await fetch(publicUrl);
+      const json2 = await res2.json();
+      assert(res2.ok && json2.ok, 'second public GET must succeed');
+
+      assert(JSON.stringify(json1) === JSON.stringify(json2), 'two public GETs must return identical JSON');
+      assert(res1.headers.get('access-control-allow-origin') === '*', 'CORS origin header must be preserved');
+      assert(res2.headers.get('access-control-allow-origin') === '*', 'CORS origin header must be preserved on cached response');
+    }),
   ];
 
   try {

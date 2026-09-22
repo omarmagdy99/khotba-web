@@ -220,12 +220,47 @@ function showError(container, message, retryFn) {
 
 function confirmBox(message) { return window.confirm(message); }
 
-// ─────────────────────────────────────────── تصدير PDF
+var _pdfLibrariesPromise = null;
+
+function loadPdfLibraries() {
+  if (typeof html2canvas !== 'undefined' && window.jspdf) {
+    return Promise.resolve();
+  }
+  if (_pdfLibrariesPromise) return _pdfLibrariesPromise;
+
+  function loadScript(src) {
+    return new Promise(function (resolve, reject) {
+      var s = document.createElement('script');
+      s.src = src;
+      s.onload = resolve;
+      s.onerror = function () {
+        reject(new Error('Failed to load: ' + src));
+      };
+      document.head.appendChild(s);
+    });
+  }
+
+  _pdfLibrariesPromise = Promise.all([
+    loadScript('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js'),
+    loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js')
+  ]).catch(function (err) {
+    _pdfLibrariesPromise = null;
+    throw err;
+  });
+
+  return _pdfLibrariesPromise;
+}
 
 /**
  * بيصوّر العنصر المعروض حاليًا. المكتبات محمّلة من cdnjs بإصدار مثبّت.
  */
 async function exportPdf(node, filename) {
+  try {
+    await loadPdfLibraries();
+  } catch (e) {
+    toast('مكتبة PDF لم تُحمّل — اتأكد من الإنترنت', 'err');
+    return;
+  }
   if (typeof html2canvas === 'undefined' || !window.jspdf) {
     toast('مكتبة PDF لم تُحمّل — اتأكد من الإنترنت', 'err');
     return;
