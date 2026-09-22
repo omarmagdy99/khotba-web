@@ -1,0 +1,17 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "khotba-frontend",
+  "compatibility_date": "2024-09-23",
+  "observability": {
+    "enabled": true
+  },
+  "assets": {
+    "directory": "./dist"
+  },
+  "routes": [
+    {
+      "pattern": "khotba.daaw.dev",
+      "custom_domain": true
+    }
+  ]
+}

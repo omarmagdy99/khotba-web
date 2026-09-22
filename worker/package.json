@@ -1,0 +1,16 @@
+{
+  "name": "khotba-api",
+  "version": "2.0.0",
+  "description": "Cloudflare Worker backend for Awqaf 15 May Friday Sermon Coordination",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "vitest run"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "wrangler": "^4.134.0"
+  }
+}

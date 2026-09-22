@@ -1,3 +1,28 @@
 node_modules/
+dist/
 .DS_Store
 Thumbs.db
+
+# Cloudflare & Worker artifacts
+.wrangler/
+worker/.wrangler/
+worker/.dev.vars
+.dev.vars
+*.sqlite
+*.sqlite3
+*.db
+
+# Migration snapshots, test fixtures with sensitive data, seeds
+*snapshot*.json
+*dump*.json
+*export*.json
+worker/seed.sql
+*.xlsx
+
+# Temporary scratch directory
+scratch/
+
+.dev.vars*
+!.dev.vars.example
+.env*
+!.env.example

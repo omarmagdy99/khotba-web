@@ -1,0 +1,23 @@
+/**
+ * أوقاف 15 مايو — إعداد Cloudflare Worker
+ */
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "khotba-api",
+  "main": "src/index.js",
+  "compatibility_date": "2026-08-01",
+  "observability": {
+    "enabled": true
+  },
+  "workers_dev": true,
+  "routes": [
+    { "pattern": "khotba-api.daaw.dev", "custom_domain": true }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "khotba-db",
+      "database_id": "2a6d0a44-1c19-4874-9c7a-59938f48855d"
+    }
+  ]
+}
