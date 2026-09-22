@@ -8,7 +8,7 @@ var _INVALIDATING_ACTIONS = [
   'createKhatib', 'updateKhatib', 'deactivateKhatib',
   'createMosque', 'updateMosque', 'deactivateMosque',
   'setPreferences', 'publishRange', 'saveSchedule', 'generateDate', 'regenerateDate',
-  'login'
+  'login', 'createUser', 'updateUser', 'resetUserPassword'
 ];
 
 function clearClientCache() {
@@ -76,6 +76,12 @@ async function api(action, payload) {
     clearClientCache();
   }
 
+  if (action === 'login' && json.data) {
+    if (json.data.role) localStorage.setItem('awqaf_role', json.data.role);
+    if (json.data.displayName) localStorage.setItem('awqaf_name', json.data.displayName);
+    if (json.data.username) localStorage.setItem('awqaf_username', json.data.username);
+  }
+
   return json.data;
 }
 
@@ -88,13 +94,29 @@ ApiError.prototype = Object.create(Error.prototype);
 
 function getToken() { return localStorage.getItem('awqaf_token') || ''; }
 function setToken(t) { localStorage.setItem('awqaf_token', t); }
-function clearToken() { clearClientCache(); localStorage.removeItem('awqaf_token'); localStorage.removeItem('awqaf_name'); }
+function clearToken() {
+  clearClientCache();
+  localStorage.removeItem('awqaf_token');
+  localStorage.removeItem('awqaf_name');
+  localStorage.removeItem('awqaf_username');
+  localStorage.removeItem('awqaf_role');
+}
 function getUserName() { return localStorage.getItem('awqaf_name') || ''; }
+function getUsername() { return localStorage.getItem('awqaf_username') || ''; }
+function getRole() { return localStorage.getItem('awqaf_role') || ''; }
+function setRole(r) {
+  if (r) localStorage.setItem('awqaf_role', r);
+  else localStorage.removeItem('awqaf_role');
+}
+function isAdmin() { return getRole() === 'admin'; }
+function canEdit() { return isAdmin() || getRole() === 'coordinator'; }
 
 function goLogin() {
   // Cloudflare بيقدّم الصفحات من غير .html (‎/index)، فلازم نتعرّف على الشكلين.
   if (!/(^|\/)(index(\.html)?)?$/.test(location.pathname)) location.href = 'index.html';
 }
+
+var _currentNavActive = '';
 
 /** تُستدعى في أول كل صفحة محمية. بترجّع false لو اتحوّل للدخول. */
 async function requireAuth() {
@@ -102,8 +124,21 @@ async function requireAuth() {
   try {
     var me = await api('whoami');
     localStorage.setItem('awqaf_name', me.displayName);
+    if (me.username) localStorage.setItem('awqaf_username', me.username);
+    var oldRole = getRole();
+    if (me.role) {
+      localStorage.setItem('awqaf_role', me.role);
+    }
     var el = document.getElementById('userName');
     if (el) el.textContent = me.displayName;
+    if (oldRole !== (me.role || '')) {
+      var active = _currentNavActive;
+      if (!active) {
+        var path = location.pathname.split('/').pop();
+        active = path || 'schedule.html';
+      }
+      renderNav(active);
+    }
     return true;
   } catch (e) {
     goLogin();
@@ -337,6 +372,7 @@ function appReady() {
 // ─────────────────────────────────────────── شريط التنقل
 
 function renderNav(active) {
+  _currentNavActive = active;
   var links = [
     ['schedule.html', '📅 التوزيع'],
     ['mosques.html', '🕌 المساجد'],
@@ -344,6 +380,9 @@ function renderNav(active) {
     ['khatib-schedule.html', '📋 جدول خطيب'],
     ['publish.html', '📢 النشر'],
   ];
+  if (isAdmin()) {
+    links.push(['users.html', '👥 المستخدمين']);
+  }
   var nav = el('nav');
   if (!nav) return;
   nav.innerHTML =

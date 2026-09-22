@@ -75,7 +75,7 @@ export async function login_(db, env, b, requestOrIp) {
 
   await run(db, 'INSERT INTO sessions (token, username, expires_at) VALUES (?, ?, ?)', token, u.username, expires);
 
-  return ok_({ token, displayName: u.display_name, expiresAt: expires });
+  return ok_({ token, username: u.username, displayName: u.display_name, role: u.role, expiresAt: expires });
 }
 
 async function recordLoginFailure_(db, ipKey, uKey, cutoffIso) {
@@ -116,7 +116,7 @@ export async function auth_(db, token) {
   if (!token) return null;
 
   const row = await one(db, `
-    SELECT u.username, u.display_name, u.password_hash, u.salt, u.active, u.created_at, s.expires_at
+    SELECT u.username, u.display_name, u.password_hash, u.salt, u.active, u.created_at, u.role, s.expires_at
     FROM sessions s
     JOIN users u ON u.username = s.username
     WHERE s.token = ?
@@ -138,11 +138,22 @@ export async function auth_(db, token) {
     salt: row.salt,
     active: row.active,
     created_at: row.created_at,
+    role: row.role,
   };
 }
 
 export function whoami_(user) {
-  return ok_({ username: user.username, displayName: user.display_name });
+  return ok_({ username: user.username, displayName: user.display_name, role: user.role });
+}
+
+/**
+ * قواعد كلمة المرور الجديدة — مشتركة بين تغيير كلمة المرور وإدارة المستخدمين.
+ * بترجع رسالة الخطأ أو null.
+ */
+export function passwordPolicyError_(username, newPassword) {
+  if (newPassword.length < 8) return 'كلمة المرور الجديدة يجب ألا تقل عن 8 أحرف';
+  if (newPassword === username) return 'لا يمكن استخدام اسم المستخدم ككلمة مرور';
+  return null;
 }
 
 export async function changePassword_(db, env, user, token, b) {
@@ -154,13 +165,8 @@ export async function changePassword_(db, env, user, token, b) {
     return err_('BAD_PASSWORD', 'كلمة المرور الحالية غير صحيحة');
   }
 
-  if (newPassword.length < 8) {
-    return err_('BAD_REQUEST', 'كلمة المرور الجديدة يجب ألا تقل عن 8 أحرف');
-  }
-
-  if (newPassword === user.username) {
-    return err_('BAD_REQUEST', 'لا يمكن استخدام اسم المستخدم ككلمة مرور');
-  }
+  const policyError = passwordPolicyError_(user.username, newPassword);
+  if (policyError) return err_('BAD_REQUEST', policyError);
 
   if (newPassword === currentPassword) {
     return err_('BAD_REQUEST', 'كلمة المرور الجديدة مطابقة لكلمة المرور الحالية');

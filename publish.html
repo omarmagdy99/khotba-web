@@ -28,7 +28,7 @@
         <input type="date" id="publishTo">
       </div>
 
-      <div style="display:flex;gap:10px;align-items:end;grid-column:1/-1">
+      <div style="display:flex;gap:10px;align-items:end;grid-column:1/-1" id="publishActions">
         <button class="btn btn-ok" id="publishBtn" style="flex:1">📢 نشر الجدول</button>
         <button class="btn btn-danger" id="unpublishBtn">إلغاء النشر</button>
       </div>
@@ -58,6 +58,10 @@
 
     (async function () {
       if (!await requireAuth()) return;
+      if (!canEdit()) {
+        var actionsDiv = el('publishActions');
+        if (actionsDiv) actionsDiv.style.display = 'none';
+      }
       await loadPublishSettings();
       appReady();
     })();

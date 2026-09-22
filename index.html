@@ -63,6 +63,8 @@
         });
         setToken(data.token);
         localStorage.setItem('awqaf_name', data.displayName);
+        if (data.username) localStorage.setItem('awqaf_username', data.username);
+        if (data.role) localStorage.setItem('awqaf_role', data.role);
         location.href = 'schedule.html';
       } catch (e) {
         errBox.textContent = e.message;

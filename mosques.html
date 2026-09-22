@@ -93,6 +93,10 @@
 
     (async function () {
       if (!await requireAuth()) return;
+      if (!canEdit()) {
+        var addBtn = el('addMosqueBtn');
+        if (addBtn) addBtn.style.display = 'none';
+      }
       await loadData();
       appReady();
     })();
@@ -192,13 +196,14 @@
       var khatibMap = {};
       allKhatibs.forEach(function (k) { khatibMap[k.id] = k.name; });
 
+      var cols = canEdit() ? '2fr 1.2fr 2fr 1fr 1.5fr;' : '2fr 1.2fr 2fr 1fr;';
       var html = '<div class="table-container">' +
-        '<div class="table-header" style="grid-template-columns: 2fr 1.2fr 2fr 1fr 1.5fr;">' +
+        '<div class="table-header" style="grid-template-columns: ' + cols + '">' +
           '<div>اسم المسجد</div>' +
           '<div>المجاورة</div>' +
           '<div>الخطيب الثابت</div>' +
           '<div>الحالة</div>' +
-          '<div>إجراءات</div>' +
+          (canEdit() ? '<div>إجراءات</div>' : '') +
         '</div>';
 
       items.forEach(function (m) {
@@ -206,19 +211,19 @@
         var permId = m.permanent_khatib_id || m.permanentKhatibId || '';
         var permName = permId ? (khatibMap[permId] || permId) : '';
 
-        html += '<div class="table-row" style="grid-template-columns: 2fr 1.2fr 2fr 1fr 1.5fr;">' +
+        html += '<div class="table-row" style="grid-template-columns: ' + cols + '">' +
           '<div data-label="اسم المسجد"><strong>' + esc(m.name) + '</strong></div>' +
           '<div data-label="المجاورة"><span class="area-badge">' + esc(m.mujawra) + '</span></div>' +
           '<div data-label="الخطيب الثابت">' + (permName ? esc(permName) : '<span class="muted">غير محدد</span>') + '</div>' +
           '<div data-label="الحالة">' +
             (active ? '<span class="badge badge-volunteer">نشط</span>' : '<span class="badge badge-off">غير نشط</span>') +
           '</div>' +
-          '<div data-label="إجراءات" style="display:flex;gap:6px;flex-wrap:wrap">' +
+          (canEdit() ? ('<div data-label="إجراءات" style="display:flex;gap:6px;flex-wrap:wrap">' +
             '<button class="btn btn-sm btn-plain" onclick="openEditModal(\'' + esc(m.id) + '\')">تعديل</button>' +
             (active
               ? '<button class="btn btn-sm btn-danger" onclick="toggleActive(\'' + esc(m.id) + '\', false)">إلغاء التنشيط</button>'
               : '<button class="btn btn-sm btn-ok" onclick="toggleActive(\'' + esc(m.id) + '\', true)">تنشيط</button>') +
-          '</div>' +
+          '</div>') : '') +
         '</div>';
       });
 

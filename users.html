@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>إدارة المستخدمين — أوقاف 15 مايو</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.rtl.min.css">
+  <link rel="stylesheet" href="assets/style.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</head>
+<body>
+  <div id="nav"></div>
+  <div class="container" id="mainContainer">
+    <h1><span>👥</span> إدارة المستخدمين</h1>
+
+    <!-- حالة تظهر لغير المديرين -->
+    <div id="forbiddenState" class="state error" style="display:none">
+      <span class="state-icon">🚫</span>
+      <p style="font-size:1.25em;font-weight:bold;margin-bottom:8px">الصفحة دي للمدير بس</p>
+      <p class="muted">ليس لديك الصلاحيات اللازمة للوصول إلى إدارة المستخدمين.</p>
+      <a href="schedule.html" class="btn" style="text-decoration:none;display:inline-block;margin-top:16px">الرجوع إلى التوزيع</a>
+    </div>
+
+    <!-- محتوى الصفحة للمدير -->
+    <div id="adminContent" style="display:none">
+      <div class="search-box">
+        <span class="search-icon">🔍</span>
+        <input type="text" id="searchInput" class="search-input" placeholder="ابحث بالاسم المعروض أو اسم المستخدم أو الدور...">
+        <button id="clearSearchBtn" class="clear-btn">✕</button>
+      </div>
+
+      <div class="stats-bar">
+        <div>
+          <span>إجمالي المستخدمين: </span><strong id="totalCount">0</strong>
+          <span style="margin: 0 8px;">|</span>
+          <span>المستخدمون النشطون: </span><strong id="activeCount">0</strong>
+        </div>
+        <button class="btn btn-ok" id="addUserBtn">➕ إضافة مستخدم جديد</button>
+      </div>
+
+      <div id="results"></div>
+    </div>
+  </div>
+
+  <!-- Modal: إضافة مستخدم جديد -->
+  <div id="addUserModal" class="modal-backdrop">
+    <div class="modal">
+      <h2>إضافة مستخدم جديد</h2>
+      <form id="addUserForm" class="form-grid" autocomplete="off">
+        <div class="field">
+          <label for="addUsername">اسم المستخدم *</label>
+          <input type="text" id="addUsername" required autocomplete="off" placeholder="مثال: ahmed.ali">
+          <div class="hint">من 3 إلى 32 حرفاً أو رقماً إنجليزياً (مسموح بـ . _ -)</div>
+        </div>
+
+        <div class="field">
+          <label for="addDisplayName">الاسم المعروض *</label>
+          <input type="text" id="addDisplayName" required placeholder="مثال: الشيخ أحمد علي">
+        </div>
+
+        <div class="field">
+          <label for="addRole">الدور الصلاحياتي *</label>
+          <select id="addRole" required>
+            <option value="coordinator" selected>منسق (إدارة الجداول والمساجد والخطباء والنشر)</option>
+            <option value="viewer">مشاهد (قراءة وتصدير فقط)</option>
+            <option value="admin">مدير النظام (كامل الصلاحيات بما فيها إدارة المستخدمين)</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="addPassword">كلمة المرور *</label>
+          <input type="password" id="addPassword" required autocomplete="new-password" placeholder="8 أحرف على الأقل">
+          <div class="hint">8 أحرف على الأقل، وتكون مختلفة عن اسم المستخدم</div>
+        </div>
+
+        <div class="field">
+          <label for="addConfirmPassword">تأكيد كلمة المرور *</label>
+          <input type="password" id="addConfirmPassword" required autocomplete="new-password" placeholder="أعد إدخال كلمة المرور">
+        </div>
+
+        <div id="addFormError" class="notice notice-err" style="display:none"></div>
+
+        <div class="modal-actions">
+          <button type="submit" class="btn" id="saveAddUserBtn">إضافة المستخدم</button>
+          <button type="button" class="btn btn-plain" id="cancelAddUserBtn">إلغاء</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: تعديل بيانات مستخدم -->
+  <div id="editUserModal" class="modal-backdrop">
+    <div class="modal">
+      <h2>تعديل بيانات المستخدم</h2>
+      <form id="editUserForm" class="form-grid" autocomplete="off">
+        <input type="hidden" id="editUsername">
+
+        <div style="background:#f8fafc;padding:10px 14px;border-radius:12px;margin-bottom:6px;border:1px solid var(--line)">
+          <span style="color:var(--muted);font-size:0.88em">اسم المستخدم: </span>
+          <strong id="editUsernameDisplay" class="mono" style="color:var(--navy)"></strong>
+        </div>
+
+        <div id="selfEditNotice" class="notice notice-warn" style="display:none;margin-bottom:8px">
+          ⚠️ هذا حسابك الحالي: لا يمكنك تغيير دورك أو إلغاء تنشيط حسابك بنفسك. لتغيير كلمة المرور توجه لصفحة <a href="account.html" style="font-weight:bold;color:var(--navy)">كلمة المرور</a>.
+        </div>
+
+        <div class="field">
+          <label for="editDisplayName">الاسم المعروض *</label>
+          <input type="text" id="editDisplayName" required placeholder="مثال: الشيخ أحمد علي">
+        </div>
+
+        <div class="field">
+          <label for="editRole">الدور الصلاحياتي *</label>
+          <select id="editRole" required>
+            <option value="coordinator">منسق (إدارة الجداول والمساجد والخطباء والنشر)</option>
+            <option value="viewer">مشاهد (قراءة وتصدير فقط)</option>
+            <option value="admin">مدير النظام (كامل الصلاحيات بما فيها إدارة المستخدمين)</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <div class="radio-row">
+            <label><input type="checkbox" id="editActive"> مستخدم نشط (يمكنه الدخول واستخدام النظام)</label>
+          </div>
+        </div>
+
+        <div id="editFormError" class="notice notice-err" style="display:none"></div>
+
+        <div class="modal-actions">
+          <button type="submit" class="btn" id="saveEditUserBtn">حفظ التعديلات</button>
+          <button type="button" class="btn btn-plain" id="cancelEditUserBtn">إلغاء</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: تعيين كلمة مرور جديدة -->
+  <div id="resetPasswordModal" class="modal-backdrop">
+    <div class="modal">
+      <h2>تعيين كلمة مرور جديدة للمستخدم</h2>
+      <form id="resetPasswordForm" class="form-grid" autocomplete="off">
+        <input type="hidden" id="resetUsername">
+
+        <div style="background:#f8fafc;padding:10px 14px;border-radius:12px;margin-bottom:6px;border:1px solid var(--line)">
+          <span style="color:var(--muted);font-size:0.88em">المستخدم: </span>
+          <strong id="resetDisplayNameDisplay"></strong> (<span id="resetUsernameDisplay" class="mono"></span>)
+        </div>
+
+        <div class="notice notice-warn" style="margin-bottom:10px">
+          ⚠️ سيؤدي تعيين كلمة مرور جديدة إلى إنهاء جميع الجلسات المفتوحة لهذا المستخدم فوراً.
+        </div>
+
+        <div class="field">
+          <label for="resetNewPassword">كلمة المرور الجديدة *</label>
+          <input type="password" id="resetNewPassword" required autocomplete="new-password" placeholder="8 أحرف على الأقل">
+          <div class="hint">8 أحرف على الأقل، ومختلفة عن اسم المستخدم</div>
+        </div>
+
+        <div class="field">
+          <label for="resetConfirmPassword">تأكيد كلمة المرور الجديدة *</label>
+          <input type="password" id="resetConfirmPassword" required autocomplete="new-password" placeholder="أعد إدخال كلمة المرور الجديدة">
+        </div>
+
+        <div id="resetFormError" class="notice notice-err" style="display:none"></div>
+
+        <div class="modal-actions">
+          <button type="submit" class="btn btn-danger" id="saveResetPasswordBtn">تعيين كلمة المرور</button>
+          <button type="button" class="btn btn-plain" id="cancelResetPasswordBtn">إلغاء</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="config.js"></script>
+  <script src="assets/app.js"></script>
+  <script>
+    renderNav('users.html');
+
+    var allUsers = [];
+    var currentUsername = '';
+
+    (async function () {
+      if (!await requireAuth()) return;
+
+      if (!isAdmin()) {
+        el('forbiddenState').style.display = 'block';
+        el('adminContent').style.display = 'none';
+        appReady();
+        return;
+      }
+
+      el('forbiddenState').style.display = 'none';
+      el('adminContent').style.display = 'block';
+
+      try {
+        var me = await api('whoami');
+        if (me && me.username) {
+          currentUsername = me.username;
+          localStorage.setItem('awqaf_username', me.username);
+        }
+      } catch (e) {
+        currentUsername = getUsername();
+      }
+
+      await loadUsers();
+      appReady();
+    })();
+
+    async function loadUsers() {
+      showLoading(el('results'), 'جاري تحميل المستخدمين...');
+      try {
+        var res = await api('listUsers');
+        allUsers = res.users || [];
+        renderList();
+      } catch (e) {
+        showError(el('results'), e.message, loadUsers);
+      }
+    }
+
+    function isUserActive(val) {
+      return val === true || String(val).toUpperCase() === 'TRUE';
+    }
+
+    function getRoleLabel(role) {
+      if (role === 'admin') return 'مدير النظام';
+      if (role === 'coordinator') return 'منسق';
+      if (role === 'viewer') return 'مشاهد';
+      return role || '—';
+    }
+
+    function getRoleBadge(role) {
+      if (role === 'admin') return '<span class="badge badge-primary">مدير النظام</span>';
+      if (role === 'coordinator') return '<span class="badge badge-volunteer">منسق</span>';
+      if (role === 'viewer') return '<span class="badge badge-off">مشاهد</span>';
+      return '<span class="badge badge-off">' + esc(role) + '</span>';
+    }
+
+    function getActiveBadge(active) {
+      if (isUserActive(active)) {
+        return '<span class="badge badge-volunteer">نشط</span>';
+      }
+      return '<span class="badge badge-off">غير نشط</span>';
+    }
+
+    function getFilteredUsers() {
+      var query = el('searchInput').value.trim();
+      if (!query) return allUsers.slice();
+
+      return allUsers.filter(function (u) {
+        var matchDisplay = matches(u.displayName, query);
+        var matchUser = matches(u.username, query);
+        var matchRole = matches(getRoleLabel(u.role), query);
+        return matchDisplay || matchUser || matchRole;
+      });
+    }
+
+    function renderList() {
+      var items = getFilteredUsers();
+
+      // ترتيب أبجدي حسب الاسم المعروض
+      items.sort(function (a, b) {
+        return (a.displayName || '').localeCompare(b.displayName || '', 'ar');
+      });
+
+      var activeUsers = allUsers.filter(function (u) { return isUserActive(u.active); });
+      el('totalCount').textContent = allUsers.length;
+      el('activeCount').textContent = activeUsers.length;
+
+      var resContainer = el('results');
+      if (allUsers.length === 0) {
+        showEmpty(resContainer, 'لا يوجد مستخدمون حالياً. اضغط "إضافة مستخدم جديد".');
+        return;
+      }
+      if (items.length === 0) {
+        showEmpty(resContainer, 'لا يوجد مستخدمون مطابقون لنص البحث.');
+        return;
+      }
+
+      var html = '<div class="table-container">' +
+        '<div class="table-header" style="grid-template-columns: 2fr 1.5fr 1.3fr 1fr 2.5fr;">' +
+          '<div>الاسم المعروض</div>' +
+          '<div>اسم المستخدم</div>' +
+          '<div>الدور</div>' +
+          '<div>الحالة</div>' +
+          '<div>إجراءات</div>' +
+        '</div>';
+
+      items.forEach(function (u) {
+        var isSelf = (u.username === currentUsername);
+        var selfBadge = isSelf ? ' <span class="badge badge-primary" style="font-size:0.75em">حسابك</span>' : '';
+
+        var actionsHtml = '<button class="btn btn-sm btn-plain" onclick="openEditModal(\'' + esc(u.username) + '\')">تعديل</button> ';
+        if (isSelf) {
+          actionsHtml += '<button class="btn btn-sm btn-plain" disabled title="لتغيير كلمة مرور حسابك، استخدم صفحة كلمة المرور">تعيين كلمة مرور</button>' +
+            ' <span class="hint" style="font-size:0.8em;color:var(--muted);white-space:nowrap">(استخدم <a href="account.html" style="color:var(--navy);font-weight:600">كلمة المرور</a>)</span>';
+        } else {
+          actionsHtml += '<button class="btn btn-sm btn-plain" onclick="openResetModal(\'' + esc(u.username) + '\')">تعيين كلمة مرور</button>';
+        }
+
+        html += '<div class="table-row" style="grid-template-columns: 2fr 1.5fr 1.3fr 1fr 2.5fr;">' +
+          '<div data-label="الاسم المعروض"><strong>' + esc(u.displayName) + '</strong>' + selfBadge + '</div>' +
+          '<div data-label="اسم المستخدم"><span class="mono">' + esc(u.username) + '</span></div>' +
+          '<div data-label="الدور">' + getRoleBadge(u.role) + '</div>' +
+          '<div data-label="الحالة">' + getActiveBadge(u.active) + '</div>' +
+          '<div data-label="إجراءات" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">' +
+            actionsHtml +
+          '</div>' +
+        '</div>';
+      });
+
+      html += '</div>';
+      resContainer.innerHTML = html;
+    }
+
+    // البحث والتفريغ
+    el('searchInput').addEventListener('input', function () {
+      var btn = el('clearSearchBtn');
+      if (this.value) btn.classList.add('show'); else btn.classList.remove('show');
+      renderList();
+    });
+
+    el('clearSearchBtn').addEventListener('click', function () {
+      el('searchInput').value = '';
+      this.classList.remove('show');
+      renderList();
+    });
+
+    // ── حوار إضافة مستخدم ──
+    el('addUserBtn').addEventListener('click', openAddModal);
+    el('cancelAddUserBtn').addEventListener('click', closeAddModal);
+
+    function openAddModal() {
+      el('addUserForm').reset();
+      hideAddFormError();
+      el('addUserModal').classList.add('show');
+      el('addUsername').focus();
+    }
+
+    function closeAddModal() {
+      el('addUserModal').classList.remove('show');
+      hideAddFormError();
+    }
+
+    function showAddFormError(msg) {
+      var box = el('addFormError');
+      box.textContent = msg;
+      box.style.display = 'block';
+    }
+
+    function hideAddFormError() {
+      var box = el('addFormError');
+      box.textContent = '';
+      box.style.display = 'none';
+    }
+
+    el('addUserForm').addEventListener('submit', async function (ev) {
+      ev.preventDefault();
+      hideAddFormError();
+
+      var username = el('addUsername').value.trim();
+      var displayName = el('addDisplayName').value.trim();
+      var role = el('addRole').value;
+      var password = el('addPassword').value;
+      var confirmPassword = el('addConfirmPassword').value;
+
+      if (!username || !displayName || !password || !confirmPassword) {
+        showAddFormError('يرجى ملء جميع الحقول المطلوبة');
+        return;
+      }
+
+      if (!/^[A-Za-z0-9_.-]{3,32}$/.test(username)) {
+        showAddFormError('اسم المستخدم يجب أن يكون بين 3 و 32 حرفاً ويحتوي فقط على حروف إنجليزية، أرقام، أو . _ -');
+        el('addUsername').focus();
+        return;
+      }
+
+      if (password.length < 8) {
+        showAddFormError('كلمة المرور يجب ألا تقل عن 8 أحرف');
+        el('addPassword').focus();
+        return;
+      }
+
+      if (password === username) {
+        showAddFormError('لا يمكن استخدام اسم المستخدم ككلمة مرور');
+        el('addPassword').focus();
+        return;
+      }
+
+      if (password !== confirmPassword) {
+        showAddFormError('كلمة المرور وتأكيدها غير متطابقين');
+        el('addConfirmPassword').focus();
+        return;
+      }
+
+      if (['admin', 'coordinator', 'viewer'].indexOf(role) < 0) {
+        showAddFormError('الدور المختار غير صالح');
+        return;
+      }
+
+      var btn = el('saveAddUserBtn');
+      btn.disabled = true;
+      btn.textContent = 'جاري الإضافة...';
+
+      try {
+        await api('createUser', {
+          username: username,
+          displayName: displayName,
+          password: password,
+          role: role
+        });
+        closeAddModal();
+        toast('تمت إضافة المستخدم بنجاح', 'ok');
+        await loadUsers();
+      } catch (err) {
+        showAddFormError(err.message || 'تعذر إضافة المستخدم');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'إضافة المستخدم';
+      }
+    });
+
+    // ── حوار تعديل مستخدم ──
+    el('cancelEditUserBtn').addEventListener('click', closeEditModal);
+
+    function openEditModal(username) {
+      var u = allUsers.find(function (x) { return x.username === username; });
+      if (!u) return;
+
+      var isSelf = (u.username === currentUsername);
+      el('editUsername').value = u.username;
+      el('editUsernameDisplay').textContent = u.username;
+      el('editDisplayName').value = u.displayName || '';
+      el('editRole').value = u.role || 'viewer';
+      el('editActive').checked = isUserActive(u.active);
+
+      el('editRole').disabled = isSelf;
+      el('editActive').disabled = isSelf;
+      el('selfEditNotice').style.display = isSelf ? 'block' : 'none';
+
+      hideEditFormError();
+      el('editUserModal').classList.add('show');
+      el('editDisplayName').focus();
+    }
+
+    function closeEditModal() {
+      el('editUserModal').classList.remove('show');
+      hideEditFormError();
+    }
+
+    function showEditFormError(msg) {
+      var box = el('editFormError');
+      box.textContent = msg;
+      box.style.display = 'block';
+    }
+
+    function hideEditFormError() {
+      var box = el('editFormError');
+      box.textContent = '';
+      box.style.display = 'none';
+    }
+
+    el('editUserForm').addEventListener('submit', async function (ev) {
+      ev.preventDefault();
+      hideEditFormError();
+
+      var username = el('editUsername').value;
+      var displayName = el('editDisplayName').value.trim();
+      var isSelf = (username === currentUsername);
+      var u = allUsers.find(function (x) { return x.username === username; });
+      var role = isSelf ? (u ? u.role : 'admin') : el('editRole').value;
+      var active = isSelf ? (u ? isUserActive(u.active) : true) : el('editActive').checked;
+
+      if (!displayName) {
+        showEditFormError('يرجى إدخال الاسم المعروض');
+        el('editDisplayName').focus();
+        return;
+      }
+
+      var btn = el('saveEditUserBtn');
+      btn.disabled = true;
+      btn.textContent = 'جاري الحفظ...';
+
+      try {
+        await api('updateUser', {
+          username: username,
+          displayName: displayName,
+          role: role,
+          active: active
+        });
+        closeEditModal();
+        toast('تم تعديل بيانات المستخدم بنجاح', 'ok');
+        await loadUsers();
+      } catch (err) {
+        showEditFormError(err.message || 'تعذر تعديل بيانات المستخدم');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'حفظ التعديلات';
+      }
+    });
+
+    // ── حوار تعيين كلمة مرور جديدة ──
+    el('cancelResetPasswordBtn').addEventListener('click', closeResetModal);
+
+    function openResetModal(username) {
+      var u = allUsers.find(function (x) { return x.username === username; });
+      if (!u) return;
+
+      if (u.username === currentUsername) {
+        toast('لتغيير كلمة مرور حسابك، يرجى استخدام صفحة كلمة المرور', 'warn');
+        return;
+      }
+
+      el('resetPasswordForm').reset();
+      el('resetUsername').value = u.username;
+      el('resetUsernameDisplay').textContent = u.username;
+      el('resetDisplayNameDisplay').textContent = u.displayName || u.username;
+
+      hideResetFormError();
+      el('resetPasswordModal').classList.add('show');
+      el('resetNewPassword').focus();
+    }
+
+    function closeResetModal() {
+      el('resetPasswordModal').classList.remove('show');
+      hideResetFormError();
+    }
+
+    function showResetFormError(msg) {
+      var box = el('resetFormError');
+      box.textContent = msg;
+      box.style.display = 'block';
+    }
+
+    function hideResetFormError() {
+      var box = el('resetFormError');
+      box.textContent = '';
+      box.style.display = 'none';
+    }
+
+    el('resetPasswordForm').addEventListener('submit', async function (ev) {
+      ev.preventDefault();
+      hideResetFormError();
+
+      var username = el('resetUsername').value;
+      var newPassword = el('resetNewPassword').value;
+      var confirmPassword = el('resetConfirmPassword').value;
+
+      if (username === currentUsername) {
+        showResetFormError('لتغيير كلمة مرور حسابك، يرجى استخدام صفحة كلمة المرور');
+        return;
+      }
+
+      if (newPassword.length < 8) {
+        showResetFormError('كلمة المرور الجديدة يجب ألا تقل عن 8 أحرف');
+        el('resetNewPassword').focus();
+        return;
+      }
+
+      if (newPassword === username) {
+        showResetFormError('لا يمكن استخدام اسم المستخدم ككلمة مرور');
+        el('resetNewPassword').focus();
+        return;
+      }
+
+      if (newPassword !== confirmPassword) {
+        showResetFormError('كلمة المرور الجديدة وتأكيدها غير متطابقين');
+        el('resetConfirmPassword').focus();
+        return;
+      }
+
+      var btn = el('saveResetPasswordBtn');
+      btn.disabled = true;
+      btn.textContent = 'جاري التعيين...';
+
+      try {
+        await api('resetUserPassword', {
+          username: username,
+          newPassword: newPassword
+        });
+        closeResetModal();
+        toast('تم تعيين كلمة المرور الجديدة بنجاح وإنهاء جلسات المستخدم 🔑', 'ok');
+      } catch (err) {
+        showResetFormError(err.message || 'تعذر تعيين كلمة المرور');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'تعيين كلمة المرور';
+      }
+    });
+  </script>
+</body>
+</html>

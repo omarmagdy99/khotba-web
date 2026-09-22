@@ -136,6 +136,10 @@
 
     (async function () {
       if (!await requireAuth()) return;
+      if (!canEdit()) {
+        var addBtn = el('addKhatibBtn');
+        if (addBtn) addBtn.style.display = 'none';
+      }
       await loadData();
       appReady();
     })();
@@ -232,8 +236,9 @@
         return;
       }
 
+      var cols = '2fr 1.3fr 1fr 2.2fr ' + (canEdit() ? '2fr;' : '1fr;');
       var html = '<div class="table-container">' +
-        '<div class="table-header" style="grid-template-columns: 2fr 1.3fr 1fr 2.2fr 2fr;">' +
+        '<div class="table-header" style="grid-template-columns: ' + cols + '">' +
           '<div>الاسم</div>' +
           '<div>رقم الهاتف</div>' +
           '<div>النوع</div>' +
@@ -270,18 +275,25 @@
           }
         }
 
-        html += '<div class="table-row" style="grid-template-columns: 2fr 1.3fr 1fr 2.2fr 2fr;">' +
+        var actionsHtml = '';
+        if (canEdit()) {
+          actionsHtml = '<button class="btn btn-sm btn-plain" onclick="openEditModal(\'' + esc(k.id) + '\')">تعديل</button>' +
+            '<button class="btn btn-sm btn-plain" onclick="openPrefsModal(\'' + esc(k.id) + '\')">التفضيلات</button>' +
+            '<a href="khatib-schedule.html?id=' + esc(k.id) + '" class="btn btn-sm btn-plain" style="text-decoration:none">الجدول</a>' +
+            (active
+              ? '<button class="btn btn-sm btn-danger" onclick="toggleActive(\'' + esc(k.id) + '\', false)">إلغاء التنشيط</button>'
+              : '<button class="btn btn-sm btn-ok" onclick="toggleActive(\'' + esc(k.id) + '\', true)">تنشيط</button>');
+        } else {
+          actionsHtml = '<a href="khatib-schedule.html?id=' + esc(k.id) + '" class="btn btn-sm btn-plain" style="text-decoration:none">الجدول</a>';
+        }
+
+        html += '<div class="table-row" style="grid-template-columns: ' + cols + '">' +
           '<div data-label="الاسم"><a href="khatib-schedule.html?id=' + esc(k.id) + '" style="color:var(--navy);font-weight:600;text-decoration:none">' + esc(k.name) + '</a></div>' +
           '<div data-label="رقم الهاتف">' + phoneHtml + '</div>' +
           '<div data-label="النوع">' + typeBadge + '</div>' +
           '<div data-label="المساجد المفضلة">' + prefsHtml + '</div>' +
           '<div data-label="إجراءات" style="display:flex;gap:4px;flex-wrap:wrap">' +
-            '<button class="btn btn-sm btn-plain" onclick="openEditModal(\'' + esc(k.id) + '\')">تعديل</button>' +
-            '<button class="btn btn-sm btn-plain" onclick="openPrefsModal(\'' + esc(k.id) + '\')">التفضيلات</button>' +
-            '<a href="khatib-schedule.html?id=' + esc(k.id) + '" class="btn btn-sm btn-plain" style="text-decoration:none">الجدول</a>' +
-            (active
-              ? '<button class="btn btn-sm btn-danger" onclick="toggleActive(\'' + esc(k.id) + '\', false)">إلغاء التنشيط</button>'
-              : '<button class="btn btn-sm btn-ok" onclick="toggleActive(\'' + esc(k.id) + '\', true)">تنشيط</button>') +
+            actionsHtml +
           '</div>' +
         '</div>';
       });

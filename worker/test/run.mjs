@@ -726,6 +726,91 @@ async function main() {
       assert(res1.headers.get('access-control-allow-origin') === '*', 'CORS origin header must be preserved');
       assert(res2.headers.get('access-control-allow-origin') === '*', 'CORS origin header must be preserved on cached response');
     }),
+
+    test('Scenario 14: roles and user management', async () => {
+      const ipHeaders = { 'CF-Connecting-IP': '198.51.100.140' };
+      const loginAs = async (username, password) => {
+        const r = await api({ action: 'login', username, password }, ipHeaders);
+        assert(r.ok, `login as ${username} must succeed: ${JSON.stringify(r.error)}`);
+        return r.data;
+      };
+
+      // whoami carries the role
+      const me = await api({ action: 'whoami', token });
+      assert(me.ok && me.data.role === 'admin', `testadmin must be admin, got ${me.data?.role}`);
+
+      // createUser validation
+      const badName = await api({ action: 'createUser', token, username: 'ab', displayName: 'x', password: 'longenough1', role: 'viewer' });
+      assert(badName.error?.code === 'BAD_REQUEST', 'short username rejected');
+      const badRole = await api({ action: 'createUser', token, username: 'someone', displayName: 'x', password: 'longenough1', role: 'root' });
+      assert(badRole.error?.code === 'BAD_REQUEST', 'unknown role rejected');
+      const shortPw = await api({ action: 'createUser', token, username: 'someone', displayName: 'x', password: 'short', role: 'viewer' });
+      assert(shortPw.error?.code === 'BAD_REQUEST', 'short password rejected');
+
+      for (const u of [
+        { username: 'coord1', displayName: 'منسق', password: 'coordpass1', role: 'coordinator' },
+        { username: 'view1', displayName: 'مشاهد', password: 'viewpass1', role: 'viewer' },
+        { username: 'admin2', displayName: 'مدير تاني', password: 'adminpass2', role: 'admin' },
+      ]) {
+        const r = await api({ action: 'createUser', token, ...u });
+        assert(r.ok, `createUser ${u.username} must succeed: ${JSON.stringify(r.error)}`);
+      }
+      const dup = await api({ action: 'createUser', token, username: 'COORD1', displayName: 'x', password: 'longenough1', role: 'viewer' });
+      assert(dup.error?.code === 'DUPLICATE', `case-insensitive duplicate must be DUPLICATE, got ${dup.error?.code}`);
+
+      const list = await api({ action: 'listUsers', token });
+      assert(list.ok && list.data.users.length >= 4, 'listUsers returns users');
+      assert(list.data.users.every(u => !('password_hash' in u) && !('salt' in u) && !('passwordHash' in u)), 'listUsers must not leak hashes');
+
+      // coordinator: can write schedule data, cannot manage users
+      const coord = await loginAs('coord1', 'coordpass1');
+      assert(coord.role === 'coordinator', 'login returns role');
+      const coordGen = await api({ action: 'generateDate', token: coord.token, date: fridayDate });
+      assert(coordGen.ok, `coordinator may call generateDate: ${JSON.stringify(coordGen.error)}`);
+      const coordUsers = await api({ action: 'listUsers', token: coord.token });
+      assert(coordUsers.error?.code === 'FORBIDDEN', 'coordinator cannot list users');
+
+      // viewer: read only
+      const viewer = await loginAs('view1', 'viewpass1');
+      const vRead = await api({ action: 'listMosques', token: viewer.token });
+      assert(vRead.ok, 'viewer can read');
+      for (const action of ['generateDate', 'saveSchedule', 'publishRange', 'createMosque', 'setPreferences', 'createUser', 'someFutureAction']) {
+        const r = await api({ action, token: viewer.token, date: fridayDate });
+        assert(r.error?.code === 'FORBIDDEN', `viewer ${action} must be FORBIDDEN, got ${JSON.stringify(r)}`);
+      }
+      const vPw = await api({ action: 'changePassword', token: viewer.token, currentPassword: 'wrong-one', newPassword: 'whatever123' });
+      assert(vPw.error?.code === 'BAD_PASSWORD', 'viewer may use changePassword');
+
+      // self-protection
+      const selfDemote = await api({ action: 'updateUser', token, username: 'testadmin', displayName: 'أدمن التجربة', role: 'viewer', active: true });
+      assert(selfDemote.error?.code === 'BAD_REQUEST', 'cannot change own role');
+      const selfOff = await api({ action: 'updateUser', token, username: 'testadmin', displayName: 'أدمن التجربة', role: 'admin', active: false });
+      assert(selfOff.error?.code === 'BAD_REQUEST', 'cannot deactivate self');
+      const selfReset = await api({ action: 'resetUserPassword', token, username: 'testadmin', newPassword: 'another12345' });
+      assert(selfReset.error?.code === 'BAD_REQUEST', 'cannot reset own password here');
+
+      // demote another admin, role takes effect on the existing session
+      const admin2 = await loginAs('admin2', 'adminpass2');
+      const demote = await api({ action: 'updateUser', token, username: 'admin2', displayName: 'مدير تاني', role: 'viewer', active: true });
+      assert(demote.ok, `demote admin2: ${JSON.stringify(demote.error)}`);
+      const a2 = await api({ action: 'listUsers', token: admin2.token });
+      assert(a2.error?.code === 'FORBIDDEN', 'demoted admin loses access immediately');
+
+      // deactivation logs the user out everywhere
+      const off = await api({ action: 'updateUser', token, username: 'view1', displayName: 'مشاهد', role: 'viewer', active: false });
+      assert(off.ok, 'deactivate viewer');
+      const vAfter = await api({ action: 'whoami', token: viewer.token });
+      assert(vAfter.error?.code === 'UNAUTHENTICATED', 'deactivated user session is gone');
+      const vLogin = await api({ action: 'login', username: 'view1', password: 'viewpass1' }, ipHeaders);
+      assert(!vLogin.ok, 'deactivated user cannot log in');
+
+      // admin password reset kills sessions and the new password works
+      const reset = await api({ action: 'resetUserPassword', token, username: 'coord1', newPassword: 'freshpass99' });
+      assert(reset.ok, `reset coord1: ${JSON.stringify(reset.error)}`);
+      const cAfter = await api({ action: 'whoami', token: coord.token });
+      assert(cAfter.error?.code === 'UNAUTHENTICATED', 'reset kills existing sessions');
+      await loginAs('coord1', 'freshpass99');
+    }),
   ];
 
   try {

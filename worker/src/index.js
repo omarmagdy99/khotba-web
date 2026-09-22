@@ -9,6 +9,7 @@
 
 import { ok_, err_, jsonResponse } from './util.js';
 import { login_, logout_, auth_, whoami_, changePassword_ } from './auth.js';
+import { listUsers_, createUser_, updateUser_, resetUserPassword_ } from './users.js';
 import { listMosques_, saveMosque_, deactivateMosque_ } from './mosques.js';
 import { listKhatibs_, saveKhatib_, deactivateKhatib_, setPreferences_ } from './khatibs.js';
 import {
@@ -27,7 +28,22 @@ const KNOWN_ACTIONS = [
   'createMosque', 'updateMosque', 'deactivateMosque',
   'createKhatib', 'updateKhatib', 'deactivateKhatib', 'setPreferences',
   'generateDate', 'regenerateDate', 'saveSchedule', 'publishRange',
+  'listUsers', 'createUser', 'updateUser', 'resetUserPassword',
 ];
+
+// أقل صلاحية مطلوبة لكل إجراء. أي إجراء مش مذكور هنا بيتعامل على إنه للمدير بس،
+// عشان إجراء جديد يتنسي هنا ميبقاش مفتوح للمشاهد بالغلط.
+const ROLE_RANK = { viewer: 0, coordinator: 1, admin: 2 };
+const ACTION_ROLE = {
+  whoami: 'viewer', changePassword: 'viewer',
+  listMosques: 'viewer', listKhatibs: 'viewer', getSchedule: 'viewer',
+  getKhatibSchedule: 'viewer', listDates: 'viewer', getLoadCounts: 'viewer', getSettings: 'viewer',
+  createMosque: 'coordinator', updateMosque: 'coordinator', deactivateMosque: 'coordinator',
+  createKhatib: 'coordinator', updateKhatib: 'coordinator', deactivateKhatib: 'coordinator',
+  setPreferences: 'coordinator', generateDate: 'coordinator', regenerateDate: 'coordinator',
+  saveSchedule: 'coordinator', publishRange: 'coordinator',
+  listUsers: 'admin', createUser: 'admin', updateUser: 'admin', resetUserPassword: 'admin',
+};
 
 export default {
   async fetch(request, env, ctx) {
@@ -114,6 +130,11 @@ async function route_(b, env, request) {
     return err_('UNAUTHENTICATED', 'انتهت الجلسة، سجّل الدخول من جديد');
   }
 
+  const need = ACTION_ROLE[a] || 'admin';
+  if ((ROLE_RANK[user.role] ?? -1) < ROLE_RANK[need]) {
+    return err_('FORBIDDEN', 'مش مسموح لك تعمل الحركة دي');
+  }
+
   switch (a) {
     case 'whoami':            return whoami_(user);
     case 'changePassword':    return await changePassword_(env.DB, env, user, b.token, b);
@@ -135,6 +156,10 @@ async function route_(b, env, request) {
     case 'saveSchedule':      return await saveSchedule_(env.DB, user, b);
     case 'publishRange':      return await publishRange_(env.DB, b.from, b.to);
     case 'getSettings':       return await getSettings_(env.DB);
+    case 'listUsers':         return await listUsers_(env.DB);
+    case 'createUser':        return await createUser_(env.DB, env, b);
+    case 'updateUser':        return await updateUser_(env.DB, user, b);
+    case 'resetUserPassword': return await resetUserPassword_(env.DB, env, user, b);
   }
 
   const hint = KNOWN_ACTIONS.indexOf(a) >= 0 ? ' — هذا الإجراء معروف لكن لم يتم ربطه بشكل صحيح.' : '';

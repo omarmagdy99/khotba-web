@@ -59,7 +59,8 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash TEXT NOT NULL,
   salt TEXT NOT NULL,
   active INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'coordinator' CHECK(role IN ('admin', 'coordinator', 'viewer'))
 );
 
 -- 6. جلسات الدخول (sessions)

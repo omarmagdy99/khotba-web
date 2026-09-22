@@ -9,8 +9,8 @@ INSERT OR REPLACE INTO settings (key, value) VALUES ('next_khatib_seq', '6');
 
 -- 2. users
 -- testadmin / password123 with salt somesalt456 -> sha256('somesalt456password123')
-INSERT OR REPLACE INTO users (username, display_name, password_hash, salt, active, created_at)
-VALUES ('testadmin', 'أدمن التجربة', '303d7952b56e3a886071ce2e4f645aa5573236497276600427dc3804eac8443e', 'somesalt456', 1, '2026-09-22T00:00:00.000Z');
+INSERT OR REPLACE INTO users (username, display_name, password_hash, salt, active, created_at, role)
+VALUES ('testadmin', 'أدمن التجربة', '303d7952b56e3a886071ce2e4f645aa5573236497276600427dc3804eac8443e', 'somesalt456', 1, '2026-09-22T00:00:00.000Z', 'admin');
 
 -- 3. khatibs (~5 khatibs: one inactive, two with phones)
 INSERT OR REPLACE INTO khatibs (id, name, phone, type, notes, active, created_at)
