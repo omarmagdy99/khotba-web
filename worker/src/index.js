@@ -8,7 +8,7 @@
 // - كود الحالة HTTP 200 دائماً داخل مغلف { ok: true/false }
 
 import { ok_, err_, jsonResponse } from './util.js';
-import { login_, logout_, auth_, whoami_ } from './auth.js';
+import { login_, logout_, auth_, whoami_, changePassword_ } from './auth.js';
 import { listMosques_, saveMosque_, deactivateMosque_ } from './mosques.js';
 import { listKhatibs_, saveKhatib_, deactivateKhatib_, setPreferences_ } from './khatibs.js';
 import {
@@ -21,7 +21,7 @@ import { one } from './db.js';
 const SCRIPT_VERSION = '2026-07-26';
 
 const KNOWN_ACTIONS = [
-  'login', 'logout', 'whoami',
+  'login', 'logout', 'whoami', 'changePassword',
   'listMosques', 'listKhatibs', 'getSchedule', 'getKhatibSchedule', 'listDates',
   'getLoadCounts', 'getSettings',
   'createMosque', 'updateMosque', 'deactivateMosque',
@@ -117,6 +117,7 @@ async function route_(b, env) {
 
   switch (a) {
     case 'whoami':            return whoami_(user);
+    case 'changePassword':    return await changePassword_(env.DB, env, user, b.token, b);
     case 'listMosques':       return await listMosques_(env.DB, b.includeInactive);
     case 'listKhatibs':       return await listKhatibs_(env.DB, b.includeInactive);
     case 'getSchedule':       return await getSchedule_(env.DB, b.date);

@@ -1,6 +1,6 @@
 // أوقاف 15 مايو — المصادقة وإدارة الجلسات
 
-import { one, run } from './db.js';
+import { one, run, batch } from './db.js';
 import { hashPassword, timingSafeEqual, randomHex } from './crypto.js';
 import { ok_, err_, isTrue_ } from './util.js';
 
@@ -54,4 +54,39 @@ export async function auth_(db, token) {
 
 export function whoami_(user) {
   return ok_({ username: user.username, displayName: user.display_name });
+}
+
+export async function changePassword_(db, env, user, token, b) {
+  const currentPassword = String(b.currentPassword || '');
+  const newPassword = String(b.newPassword || '');
+
+  const computedCurrent = hashPassword(currentPassword, user.salt, env.PEPPER);
+  if (!timingSafeEqual(computedCurrent, user.password_hash)) {
+    return err_('BAD_PASSWORD', 'كلمة المرور الحالية غير صحيحة');
+  }
+
+  if (newPassword.length < 8) {
+    return err_('BAD_REQUEST', 'كلمة المرور الجديدة يجب ألا تقل عن 8 أحرف');
+  }
+
+  if (newPassword === user.username) {
+    return err_('BAD_REQUEST', 'لا يمكن استخدام اسم المستخدم ككلمة مرور');
+  }
+
+  if (newPassword === currentPassword) {
+    return err_('BAD_REQUEST', 'كلمة المرور الجديدة مطابقة لكلمة المرور الحالية');
+  }
+
+  const newSalt = randomHex(16);
+  const newHash = hashPassword(newPassword, newSalt, env.PEPPER);
+
+  const stmts = [
+    db.prepare('UPDATE users SET password_hash = ?, salt = ? WHERE username = ?')
+      .bind(newHash, newSalt, user.username),
+    db.prepare('DELETE FROM sessions WHERE username = ? AND token != ?')
+      .bind(user.username, token),
+  ];
+  await batch(db, stmts);
+
+  return ok_({ changed: true });
 }

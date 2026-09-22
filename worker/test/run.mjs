@@ -445,6 +445,99 @@ async function main() {
       assert(!badJson.ok, 'invalid JSON must fail');
       assert(badJson.error.code === 'BAD_REQUEST', 'code must be BAD_REQUEST');
     }),
+
+    test('Scenario 11: changePassword validation and bad current password', async () => {
+      // Ping includes changePassword in actions
+      const pingRes = await fetch(`${BASE_URL}/?ping=1`).then(r => r.json());
+      assert(pingRes.ok && pingRes.data.actions.includes('changePassword'), 'ping actions must include changePassword');
+
+      // Wrong current password -> BAD_PASSWORD and session still valid
+      const badPassRes = await api({
+        action: 'changePassword',
+        token,
+        currentPassword: 'wrongpassword',
+        newPassword: 'validNewPassword123',
+      });
+      assert(!badPassRes.ok, 'wrong current password must fail');
+      assert(badPassRes.error.code === 'BAD_PASSWORD', 'error code must be BAD_PASSWORD');
+      assert(badPassRes.error.message === 'كلمة المرور الحالية غير صحيحة', 'message must be Arabic bad password notice');
+
+      // Verify session is still valid
+      const checkSession = await api({ action: 'whoami', token });
+      assert(checkSession.ok, 'session must remain valid after BAD_PASSWORD');
+      assert(checkSession.data.username === 'testadmin', 'username must match');
+
+      // Too short (< 8 chars) -> BAD_REQUEST
+      const shortPassRes = await api({
+        action: 'changePassword',
+        token,
+        currentPassword: 'password123',
+        newPassword: 'short',
+      });
+      assert(!shortPassRes.ok, 'too short password must fail');
+      assert(shortPassRes.error.code === 'BAD_REQUEST', 'too short password must return BAD_REQUEST');
+
+      // Equals username -> BAD_REQUEST
+      const userPassRes = await api({
+        action: 'changePassword',
+        token,
+        currentPassword: 'password123',
+        newPassword: 'testadmin',
+      });
+      assert(!userPassRes.ok, 'password equal to username must fail');
+      assert(userPassRes.error.code === 'BAD_REQUEST', 'equals username must return BAD_REQUEST');
+
+      // Same as current -> BAD_REQUEST
+      const samePassRes = await api({
+        action: 'changePassword',
+        token,
+        currentPassword: 'password123',
+        newPassword: 'password123',
+      });
+      assert(!samePassRes.ok, 'password equal to current password must fail');
+      assert(samePassRes.error.code === 'BAD_REQUEST', 'same as current must return BAD_REQUEST');
+    }),
+
+    test('Scenario 12: changePassword success, session invalidation and re-login', async () => {
+      // 1. Log in twice first to obtain a second session token
+      const secondLogin = await api({ action: 'login', username: 'testadmin', password: 'password123' });
+      assert(secondLogin.ok, 'second login must succeed');
+      const token2 = secondLogin.data.token;
+      assert(token2 && token2 !== token, 'second token must be distinct from original token');
+
+      const checkToken2 = await api({ action: 'whoami', token: token2 });
+      assert(checkToken2.ok, 'token2 must be valid before password change');
+
+      // 2. Successfully change password using the first token
+      const changeRes = await api({
+        action: 'changePassword',
+        token,
+        currentPassword: 'password123',
+        newPassword: 'newSecretPassword456',
+      });
+      assert(changeRes.ok, 'changePassword must succeed');
+      assert(changeRes.data && changeRes.data.changed === true, 'changed: true must be returned');
+
+      // 3. Old password no longer logs in
+      const oldLogin = await api({ action: 'login', username: 'testadmin', password: 'password123' });
+      assert(!oldLogin.ok, 'old password must not log in');
+      assert(oldLogin.error.code === 'UNAUTHENTICATED', 'old login error code must be UNAUTHENTICATED');
+
+      // 4. New password does log in
+      const newLogin = await api({ action: 'login', username: 'testadmin', password: 'newSecretPassword456' });
+      assert(newLogin.ok, 'new password must log in');
+      assert(newLogin.data.token, 'new login must return a valid token');
+
+      // 5. Current token still works
+      const checkToken1 = await api({ action: 'whoami', token });
+      assert(checkToken1.ok, 'current session token must still work');
+      assert(checkToken1.data.username === 'testadmin', 'current session username matches');
+
+      // 6. Second session token is now UNAUTHENTICATED
+      const checkToken2After = await api({ action: 'whoami', token: token2 });
+      assert(!checkToken2After.ok, 'second session token must be invalid after password change');
+      assert(checkToken2After.error.code === 'UNAUTHENTICATED', 'second token must return UNAUTHENTICATED');
+    }),
   ];
 
   try {

@@ -17,6 +17,7 @@ const htmlFiles = [
   'public.html',
   'publish.html',
   'schedule.html',
+  'account.html',
   'config.js',
   '.nojekyll'
 ];

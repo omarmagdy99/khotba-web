@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>تغيير كلمة المرور — أوقاف 15 مايو</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.rtl.min.css">
+  <link rel="stylesheet" href="assets/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</head>
+<body>
+  <div id="nav"></div>
+  <div class="container" style="max-width: 520px;">
+    <h1><span>🔑</span> تغيير كلمة المرور</h1>
+
+    <form id="passwordForm" class="form-grid" autocomplete="off">
+      <div class="field">
+        <label for="currentPassword">كلمة المرور الحالية *</label>
+        <input type="password" id="currentPassword" required autocomplete="current-password" placeholder="أدخل كلمة المرور الحالية">
+      </div>
+
+      <div class="field">
+        <label for="newPassword">كلمة المرور الجديدة *</label>
+        <input type="password" id="newPassword" required autocomplete="new-password" placeholder="8 أحرف على الأقل">
+        <div class="hint">يجب ألا تقل عن 8 أحرف، وتكون مختلفة عن اسم المستخدم وعن كلمة المرور الحالية.</div>
+      </div>
+
+      <div class="field">
+        <label for="confirmPassword">تأكيد كلمة المرور الجديدة *</label>
+        <input type="password" id="confirmPassword" required autocomplete="new-password" placeholder="أعد إدخال كلمة المرور الجديدة">
+      </div>
+
+      <div id="formError" class="notice notice-err" style="display:none"></div>
+
+      <div style="display:flex;gap:10px;align-items:center;margin-top:8px">
+        <button type="submit" class="btn btn-ok" id="submitBtn">حفظ كلمة المرور</button>
+      </div>
+    </form>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="config.js"></script>
+  <script src="assets/app.js"></script>
+  <script>
+    renderNav('account.html');
+
+    var currentUsername = '';
+
+    (async function () {
+      if (!await requireAuth()) return;
+      try {
+        var me = await api('whoami');
+        if (me && me.username) currentUsername = me.username;
+      } catch (e) {}
+      appReady();
+    })();
+
+    el('passwordForm').addEventListener('submit', async function (ev) {
+      ev.preventDefault();
+
+      var errBox = el('formError');
+      errBox.style.display = 'none';
+      errBox.textContent = '';
+
+      var curPass = el('currentPassword').value;
+      var newPass = el('newPassword').value;
+      var confPass = el('confirmPassword').value;
+
+      if (!curPass) {
+        errBox.textContent = 'يرجى إدخال كلمة المرور الحالية';
+        errBox.style.display = 'block';
+        el('currentPassword').focus();
+        return;
+      }
+
+      if (newPass.length < 8) {
+        errBox.textContent = 'كلمة المرور الجديدة يجب ألا تقل عن 8 أحرف';
+        errBox.style.display = 'block';
+        el('newPassword').focus();
+        return;
+      }
+
+      if (currentUsername && newPass === currentUsername) {
+        errBox.textContent = 'لا يمكن استخدام اسم المستخدم ككلمة مرور';
+        errBox.style.display = 'block';
+        el('newPassword').focus();
+        return;
+      }
+
+      if (newPass === curPass) {
+        errBox.textContent = 'كلمة المرور الجديدة مطابقة لكلمة المرور الحالية';
+        errBox.style.display = 'block';
+        el('newPassword').focus();
+        return;
+      }
+
+      if (newPass !== confPass) {
+        errBox.textContent = 'كلمة المرور الجديدة وتأكيدها غير متطابقين';
+        errBox.style.display = 'block';
+        el('confirmPassword').focus();
+        return;
+      }
+
+      var btn = el('submitBtn');
+      btn.disabled = true;
+      btn.textContent = 'جاري الحفظ...';
+
+      try {
+        await api('changePassword', {
+          currentPassword: curPass,
+          newPassword: newPass
+        });
+        toast('تم تغيير كلمة المرور بنجاح', 'ok');
+        el('passwordForm').reset();
+      } catch (err) {
+        errBox.textContent = err.message || 'حدث خطأ أثناء تغيير كلمة المرور';
+        errBox.style.display = 'block';
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'حفظ كلمة المرور';
+      }
+    });
+  </script>
+</body>
+</html>

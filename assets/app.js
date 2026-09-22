@@ -316,5 +316,6 @@ function renderNav(active) {
       return '<a href="' + l[0] + '"' + (l[0] === active ? ' class="active"' : '') + '>' + l[1] + '</a>';
     }).join('') +
     '</div><div class="nav-user"><span id="userName">' + esc(getUserName()) +
-    '</span><button class="btn btn-plain" onclick="logout()">خروج</button></div>';
+    '</span><a href="account.html" class="nav-account-link"' + (active === 'account.html' ? ' style="font-weight:bold;color:var(--navy);text-decoration:none;"' : ' style="text-decoration:none;color:inherit;"') + '>🔑 كلمة المرور</a>' +
+    '<button class="btn btn-plain" onclick="logout()">خروج</button></div>';
 }
