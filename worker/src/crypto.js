@@ -94,6 +94,68 @@ export function hashPassword(password, salt, pepper) {
   return sha256Hex(String(salt) + String(password) + secret);
 }
 
+export const PBKDF2_ITERATIONS = 10000;
+
+/**
+ * هاش PBKDF2-HMAC-SHA256 عبر Web Crypto API (crypto.subtle)
+ * الصيغة المحفوظة: pbkdf2$<iterations>$<hex>
+ */
+export async function hashPasswordPbkdf2(password, salt, iterations = PBKDF2_ITERATIONS, pepper = '') {
+  const secret = pepper ? String(pepper) : '';
+  const pwData = ENC.encode(String(password) + secret);
+  const saltData = ENC.encode(String(salt));
+
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw',
+    pwData,
+    { name: 'PBKDF2' },
+    false,
+    ['deriveBits']
+  );
+
+  const derivedBits = await crypto.subtle.deriveBits(
+    {
+      name: 'PBKDF2',
+      salt: saltData,
+      iterations: iterations,
+      hash: 'SHA-256'
+    },
+    keyMaterial,
+    256 // 32 bytes
+  );
+
+  const bytes = new Uint8Array(derivedBits);
+  let hex = '';
+  for (let i = 0; i < bytes.length; i++) {
+    hex += HEX[bytes[i]];
+  }
+  return `pbkdf2$${iterations}$${hex}`;
+}
+
+/**
+ * التحقق المزدوج من كلمة المرور مع مقارنة ثابتة الزمن
+ * إذا كان الهاش المخزن بصيغة pbkdf2$ يتم التحقق بـ PBKDF2 بعدد التكرارات المسجل فيه
+ * غير ذلك يتم التحقق بالهاش القديم sha256 مع إشارة الترقية needsUpgrade
+ */
+export async function verifyPassword(password, salt, storedHash, pepper = '') {
+  const stored = String(storedHash || '');
+  if (stored.startsWith('pbkdf2$')) {
+    const parts = stored.split('$');
+    const iterations = parseInt(parts[1], 10);
+    if (!iterations || isNaN(iterations)) {
+      return { valid: false, needsUpgrade: false };
+    }
+    const computed = await hashPasswordPbkdf2(password, salt, iterations, pepper);
+    const valid = timingSafeEqual(computed, stored);
+    return { valid, needsUpgrade: false };
+  }
+
+  // المسار القديم: SHA-256
+  const computed = hashPassword(password, salt, pepper);
+  const valid = timingSafeEqual(computed, stored);
+  return { valid, needsUpgrade: valid };
+}
+
 /**
  * مقارنة ثابتة الزمن لمنع هجمات التوقيت
  */

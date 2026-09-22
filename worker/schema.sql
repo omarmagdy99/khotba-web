@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS mosques (
   created_at TEXT NOT NULL,
   CONSTRAINT uq_mosque_name_mujawra UNIQUE (name, mujawra)
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mosques_permanent ON mosques(permanent_khatib_id) WHERE permanent_khatib_id IS NOT NULL AND permanent_khatib_id != '';
 
 -- 2. الخطباء (khatibs)
 CREATE TABLE IF NOT EXISTS khatibs (
@@ -74,3 +75,11 @@ CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+
+-- 8. محاولات تسجيل الدخول (login_attempts)
+CREATE TABLE IF NOT EXISTS login_attempts (
+  key TEXT PRIMARY KEY,
+  count INTEGER NOT NULL,
+  window_start TEXT NOT NULL
+);
+

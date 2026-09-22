@@ -22,8 +22,10 @@ export async function setSetting_(db, key, value) {
 }
 
 export async function nextId_(db, seqKey, prefix) {
-  const row = await one(db, 'SELECT value FROM settings WHERE key = ?', seqKey);
-  const n = parseInt(row ? row.value : '1', 10);
-  await setSetting_(db, seqKey, String(n + 1));
+  const row = await one(db,
+    "INSERT INTO settings(key, value) VALUES(?, '2') ON CONFLICT(key) DO UPDATE SET value = CAST(value AS INTEGER) + 1 RETURNING value",
+    seqKey
+  );
+  const n = parseInt(row.value, 10) - 1;
   return prefix + String(n).padStart(3, '0');
 }

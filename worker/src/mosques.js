@@ -51,10 +51,20 @@ export async function saveMosque_(db, user, b, isNew) {
   if (isNew) {
     const id = await nextId_(db, 'next_mosque_seq', 'M');
     const now = nowIso_();
-    await run(db,
-      'INSERT INTO mosques (id, name, mujawra, address, permanent_khatib_id, active, created_at) VALUES (?, ?, ?, ?, ?, 1, ?)',
-      id, name, mujawra, b.address || '', pk ? pk : null, now
-    );
+    try {
+      await run(db,
+        'INSERT INTO mosques (id, name, mujawra, address, permanent_khatib_id, active, created_at) VALUES (?, ?, ?, ?, ?, 1, ?)',
+        id, name, mujawra, b.address || '', pk ? pk : null, now
+      );
+    } catch (err) {
+      const msg = String(err && err.message || err);
+      if (msg.includes('UNIQUE') && (msg.includes('idx_mosques_permanent') || msg.includes('permanent_khatib_id'))) {
+        const taken = pk ? await one(db, 'SELECT name, mujawra FROM mosques WHERE permanent_khatib_id = ?', pk) : null;
+        const msgText = taken ? `هذا الخطيب ثابت بالفعل في: ${taken.name} ${taken.mujawra}` : 'هذا الخطيب ثابت بالفعل في مسجد آخر';
+        return err_('PERMANENT_CONFLICT', msgText);
+      }
+      throw err;
+    }
     return ok_({ id });
   }
 
@@ -64,10 +74,20 @@ export async function saveMosque_(db, user, b, isNew) {
   }
 
   const active = b.active === false || b.active === 0 || b.active === 'FALSE' ? 0 : 1;
-  await run(db,
-    'UPDATE mosques SET name = ?, mujawra = ?, address = ?, permanent_khatib_id = ?, active = ? WHERE id = ?',
-    name, mujawra, b.address || '', pk ? pk : null, active, b.id
-  );
+  try {
+    await run(db,
+      'UPDATE mosques SET name = ?, mujawra = ?, address = ?, permanent_khatib_id = ?, active = ? WHERE id = ?',
+      name, mujawra, b.address || '', pk ? pk : null, active, b.id
+    );
+  } catch (err) {
+    const msg = String(err && err.message || err);
+    if (msg.includes('UNIQUE') && (msg.includes('idx_mosques_permanent') || msg.includes('permanent_khatib_id'))) {
+      const taken = pk ? await one(db, 'SELECT name, mujawra FROM mosques WHERE permanent_khatib_id = ? AND id != ?', pk, b.id) : null;
+      const msgText = taken ? `هذا الخطيب ثابت بالفعل في: ${taken.name} ${taken.mujawra}` : 'هذا الخطيب ثابت بالفعل في مسجد آخر';
+      return err_('PERMANENT_CONFLICT', msgText);
+    }
+    throw err;
+  }
 
   if (isTrue_(existing.active) && !active) {
     await deactivateMosque_(db, user, b.id);

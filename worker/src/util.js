@@ -76,16 +76,13 @@ export function nowIso_() {
   return new Date().toISOString();
 }
 
-export function todayIso_() {
-  // توقيت القاهرة
-  const d = new Date();
-  const utc = d.getTime() + (d.getTimezoneOffset() * 60000);
-  const cairoDate = new Date(utc + (3600000 * 3)); // UTC+3 (Egypt Summer Time / Cairo)
-  return [
-    cairoDate.getFullYear(),
-    String(cairoDate.getMonth() + 1).padStart(2, '0'),
-    String(cairoDate.getDate()).padStart(2, '0')
-  ].join('-');
+export function todayIso_(d = new Date()) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Cairo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(d);
 }
 
 export function isTrue_(v) {

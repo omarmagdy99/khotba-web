@@ -48,13 +48,24 @@ async function waitForServer(timeoutMs = 30000) {
   throw new Error(`Timed out waiting for dev server on port ${PORT}`);
 }
 
-async function api(payload) {
+async function api(payload, headers = {}) {
   const res = await fetch(`${BASE_URL}/`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json;charset=utf-8' },
+    headers: { 'Content-Type': 'application/json;charset=utf-8', ...headers },
     body: JSON.stringify(payload),
   });
   return await res.json();
+}
+
+function d1Query(sql) {
+  const npxCmd = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+  const out = execSync(`${npxCmd} wrangler d1 execute khotba-db --local --command "${sql.replace(/"/g, '\\"')}" --json`, {
+    cwd: workerDir,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    shell: true,
+  });
+  const parsed = JSON.parse(out.toString());
+  return parsed[0]?.results || [];
 }
 
 let passed = 0;
@@ -146,25 +157,47 @@ async function main() {
   const fridayDate = '2026-09-25';
 
   const scenarios = [
-    test('Scenario 10: login works and bad token returns UNAUTHENTICATED', async () => {
-      // Bad login
+    test('Scenario H: health endpoint does not leak pepperConfigured', async () => {
+      const res = await fetch(`${BASE_URL}/health`);
+      assert(res.ok, 'health response must be ok');
+      const json = await res.json();
+      assert(json.ok && json.data, 'health payload ok');
+      assert(json.data.status === 'healthy', 'health status is healthy');
+      assert(json.data.db === true, 'db is true');
+      assert(json.data.pepperConfigured === undefined, 'pepperConfigured must NOT be in health response');
+    }),
+
+    test('Scenario 10: login works, bad token returns UNAUTHENTICATED, and legacy hash upgrades to pbkdf2 (Item G)', async () => {
+      // 1. Fixture user starts with legacy SHA-256 hash
+      const userBefore = d1Query("SELECT password_hash FROM users WHERE username = 'testadmin'")[0];
+      assert(userBefore && !userBefore.password_hash.startsWith('pbkdf2$'), 'fixture user must start with legacy hash');
+
+      // 2. Bad login
       const badLogin = await api({ action: 'login', username: 'testadmin', password: 'wrongpassword' });
       assert(!badLogin.ok, 'bad login must fail');
       assert(badLogin.error.code === 'UNAUTHENTICATED', 'code must be UNAUTHENTICATED');
 
-      // Good login
+      // 3. Good login -> authenticates and upgrades hash to PBKDF2
       const goodLogin = await api({ action: 'login', username: 'testadmin', password: 'password123' });
       assert(goodLogin.ok, 'good login must succeed');
       assert(goodLogin.data.token, 'token must be returned');
       assert(goodLogin.data.displayName === 'أدمن التجربة', 'displayName must match');
       token = goodLogin.data.token;
 
-      // Bad token check
+      // 4. Verify user's hash in DB is now pbkdf2$10000$<hex>
+      const userAfter = d1Query("SELECT password_hash FROM users WHERE username = 'testadmin'")[0];
+      assert(userAfter && userAfter.password_hash.startsWith('pbkdf2$10000$'), `hash in DB must be upgraded to pbkdf2$10000$, got: ${userAfter?.password_hash}`);
+
+      // 5. Subsequent login with the same password verifies via the upgraded PBKDF2 hash
+      const relogin = await api({ action: 'login', username: 'testadmin', password: 'password123' });
+      assert(relogin.ok, 're-login with upgraded pbkdf2 hash must succeed');
+
+      // 6. Bad token check
       const badTokenRes = await api({ action: 'whoami', token: 'invalid_token_xyz' });
       assert(!badTokenRes.ok, 'bad token must fail');
       assert(badTokenRes.error.code === 'UNAUTHENTICATED', 'code must be UNAUTHENTICATED');
 
-      // Valid token check
+      // 7. Valid token check
       const goodTokenRes = await api({ action: 'whoami', token });
       assert(goodTokenRes.ok, 'good token must succeed');
       assert(goodTokenRes.data.username === 'testadmin', 'username must match');
@@ -177,6 +210,13 @@ async function main() {
       const m1 = gen.data.rows.find(r => r.mosqueId === 'M001');
       assert(m1.khatibId === 'K001', 'M001 has prefilled permanent khatib K001');
       assert(m1.status === 'confirmed', 'M001 prefilled status is confirmed');
+    }),
+
+    test('Scenario C: generateDate twice returns existing schedule without error', async () => {
+      const genSecond = await api({ action: 'generateDate', token, date: fridayDate, dateType: 'friday' });
+      assert(genSecond.ok, 'second generateDate call must succeed without error');
+      assert(genSecond.data.exists === true, 'exists flag must be true');
+      assert(genSecond.data.rows.length === 4, 'returns all 4 mosques');
     }),
 
     test('Scenario 1: swap two khatibs in one save succeeds', async () => {
@@ -298,6 +338,36 @@ async function main() {
       });
       assert(!nonExistent.ok, 'non-existent khatib must be rejected');
       assert(nonExistent.error.code === 'BAD_REQUEST', 'code must be BAD_REQUEST');
+    }),
+
+    test('Scenario E: status-only change for a deactivated khatib past row is accepted', async () => {
+      // K005 is inactive in fixture (active = 0).
+      // Insert a past assignment for K005 on M001
+      const pastDate = '2026-09-18';
+      d1Query(`INSERT OR REPLACE INTO assignments (id, date, mosque_id, khatib_id, status, date_type, label, updated_by, updated_at) VALUES ('${pastDate}_M001', '${pastDate}', 'M001', 'K005', 'confirmed', 'friday', '', 'testadmin', '${pastDate}T00:00:00.000Z')`);
+
+      // 1. Changing only status for this existing row (with same khatib K005) must succeed
+      const statusChange = await api({
+        action: 'saveSchedule',
+        token,
+        date: pastDate,
+        changes: [{ mosqueId: 'M001', khatibId: 'K005', status: 'excused' }]
+      });
+      assert(statusChange.ok, `status-only change for deactivated khatib must be accepted: ${JSON.stringify(statusChange.error)}`);
+      const rowM1 = statusChange.data.rows.find(r => r.mosqueId === 'M001');
+      assert(rowM1 && rowM1.status === 'excused', 'status must be updated to excused');
+      assert(rowM1 && rowM1.khatibId === 'K005', 'khatibId must remain K005');
+
+      // 2. However, attempting to assign inactive khatib K005 to a different mosque (M002) must still fail
+      const assignDiff = await api({
+        action: 'saveSchedule',
+        token,
+        date: pastDate,
+        changes: [{ mosqueId: 'M002', khatibId: 'K005', status: 'confirmed' }]
+      });
+      assert(!assignDiff.ok, 'assigning inactive khatib to a different mosque must be rejected');
+      assert(assignDiff.error.code === 'BAD_REQUEST', 'must return BAD_REQUEST');
+      assert(assignDiff.error.message.includes('غير نشط'), 'must indicate khatib is inactive');
     }),
 
     test('Scenario 6: excused khatib hidden in public GET', async () => {
@@ -434,6 +504,105 @@ async function main() {
       assert(dupUpdate.error.code === 'DUPLICATE', 'error code must be DUPLICATE');
     }),
 
+    test('Scenario A: second mosque with same permanent khatib returns PERMANENT_CONFLICT', async () => {
+      // 1. Ensure K001 and M001 are active and paired
+      await api({ action: 'updateKhatib', token, id: 'K001', name: 'أحمد علي', phone: '01011111111', type: 'primary', active: true });
+      await api({ action: 'updateMosque', token, id: 'M001', name: 'مسجد النور', mujawra: 'مجاورة 1', permanentKhatibId: 'K001', active: true });
+
+      // 2. Attempt to create a second mosque with permanentKhatibId: 'K001'
+      const resCreate = await api({
+        action: 'createMosque',
+        token,
+        name: 'مسجد النقاء',
+        mujawra: 'مجاورة 15',
+        permanentKhatibId: 'K001'
+      });
+      assert(!resCreate.ok, 'creating second mosque with duplicate permanent khatib must fail');
+      assert(resCreate.error.code === 'PERMANENT_CONFLICT', `error code must be PERMANENT_CONFLICT, got: ${resCreate.error?.code}`);
+
+      // 3. Attempt to update an existing mosque (M002) to also have permanentKhatibId: 'K001'
+      const resUpdate = await api({
+        action: 'updateMosque',
+        token,
+        id: 'M002',
+        name: 'مسجد التقوى',
+        mujawra: 'مجاورة 2',
+        permanentKhatibId: 'K001'
+      });
+      assert(!resUpdate.ok, 'updating mosque to duplicate permanent khatib must fail');
+      assert(resUpdate.error.code === 'PERMANENT_CONFLICT', `error code must be PERMANENT_CONFLICT, got: ${resUpdate.error?.code}`);
+    }),
+
+    test('Scenario B: atomic ID sequence generates consecutive IDs continuing sequence', async () => {
+      // Create khatib 1 (continuing next_khatib_seq = 6 in fixture)
+      const k1 = await api({
+        action: 'createKhatib',
+        token,
+        name: 'خطيب متسلسل أول',
+        phone: '01033333331',
+        type: 'volunteer'
+      });
+      assert(k1.ok, `createKhatib 1 must succeed: ${JSON.stringify(k1.error)}`);
+      assert(k1.data.id === 'K006', `first khatib must get K006, got: ${k1.data.id}`);
+
+      // Create khatib 2
+      const k2 = await api({
+        action: 'createKhatib',
+        token,
+        name: 'خطيب متسلسل ثان',
+        phone: '01033333332',
+        type: 'volunteer'
+      });
+      assert(k2.ok, `createKhatib 2 must succeed: ${JSON.stringify(k2.error)}`);
+      assert(k2.data.id === 'K007', `second khatib must get K007, got: ${k2.data.id}`);
+
+      // Verify DB stored setting is now 8
+      const row = d1Query("SELECT value FROM settings WHERE key = 'next_khatib_seq'")[0];
+      assert(row && parseInt(row.value, 10) === 8, `next_khatib_seq must be stored as 8, got: ${row?.value}`);
+    }),
+
+    test('Scenario F: login rate limit (5 failures -> 6th RATE_LIMITED; IP threshold; username cleared on success)', async () => {
+      const limitedIp = '198.51.100.77';
+      const headers = { 'CF-Connecting-IP': limitedIp };
+
+      // 1. 5 wrong passwords from limitedIp
+      for (let i = 1; i <= 5; i++) {
+        const res = await api({ action: 'login', username: 'ratetestuser', password: 'wrongpassword' }, headers);
+        assert(!res.ok, `attempt ${i} must fail`);
+        assert(res.error.code === 'UNAUTHENTICATED', `attempt ${i} code must be UNAUTHENTICATED, got: ${res.error?.code}`);
+      }
+
+      // 2. 6th attempt (even with any password) returns RATE_LIMITED
+      const res6 = await api({ action: 'login', username: 'ratetestuser', password: 'anyPassword' }, headers);
+      assert(!res6.ok, '6th attempt must fail');
+      assert(res6.error.code === 'RATE_LIMITED', `6th attempt must be RATE_LIMITED, got: ${res6.error?.code}`);
+      assert(res6.error.message === 'محاولات كتير غلط، استنى ربع ساعة وحاول تاني', 'rate limit message in Arabic');
+
+      // 3. Different username from the SAME IP is also limited after IP threshold
+      const resOther = await api({ action: 'login', username: 'differentuser', password: 'anyPassword' }, headers);
+      assert(!resOther.ok, 'different username from rate-limited IP must fail');
+      assert(resOther.error.code === 'RATE_LIMITED', `different username from same IP must be RATE_LIMITED, got: ${resOther.error?.code}`);
+
+      // 4. Same differentuser from a DIFFERENT IP is NOT rate limited
+      const diffHeaders = { 'CF-Connecting-IP': '198.51.100.88' };
+      const resDiff = await api({ action: 'login', username: 'differentuser', password: 'anyPassword' }, diffHeaders);
+      assert(!resDiff.ok, 'login with wrong password fails');
+      assert(resDiff.error.code === 'UNAUTHENTICATED', `different IP must return UNAUTHENTICATED, got: ${resDiff.error?.code}`);
+
+      // 5. Successful login clears the username key
+      // Fail 2 times for testadmin from diffHeaders
+      await api({ action: 'login', username: 'testadmin', password: 'wrongpassword' }, diffHeaders);
+      await api({ action: 'login', username: 'testadmin', password: 'wrongpassword' }, diffHeaders);
+      const attemptsBefore = d1Query("SELECT * FROM login_attempts WHERE key = 'u:testadmin'");
+      assert(attemptsBefore.length > 0, 'u:testadmin key must exist in login_attempts');
+
+      // Successful login clears u:testadmin
+      const resGood = await api({ action: 'login', username: 'testadmin', password: 'password123' }, diffHeaders);
+      assert(resGood.ok, 'login with right password succeeds');
+      const attemptsAfter = d1Query("SELECT * FROM login_attempts WHERE key = 'u:testadmin'");
+      assert(attemptsAfter.length === 0, 'u:testadmin key must be deleted after successful login');
+    }),
+
     test('Scenario 8 (Top-level catch): internal / unhandled errors return generic Arabic message', async () => {
       // Invalid JSON body
       const badJsonRes = await fetch(`${BASE_URL}/`, {
@@ -537,6 +706,10 @@ async function main() {
       const checkToken2After = await api({ action: 'whoami', token: token2 });
       assert(!checkToken2After.ok, 'second session token must be invalid after password change');
       assert(checkToken2After.error.code === 'UNAUTHENTICATED', 'second token must return UNAUTHENTICATED');
+
+      // 7. Verify DB row has pbkdf2$10000$ format
+      const userRow = d1Query("SELECT password_hash FROM users WHERE username = 'testadmin'")[0];
+      assert(userRow && userRow.password_hash.startsWith('pbkdf2$10000$'), `changePassword must write pbkdf2$10000$, got ${userRow?.password_hash}`);
     }),
   ];
 

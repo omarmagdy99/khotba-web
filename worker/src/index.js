@@ -61,7 +61,6 @@ export default {
           return jsonResponse(ok_({
             status: dbOk ? 'healthy' : 'degraded',
             db: dbOk,
-            pepperConfigured: !!env.PEPPER,
             version: SCRIPT_VERSION,
           }));
         }
@@ -92,7 +91,7 @@ export default {
           }
         }
 
-        const actionResult = await route_(body, env);
+        const actionResult = await route_(body, env, request);
         return jsonResponse(actionResult);
       }
 
@@ -104,10 +103,10 @@ export default {
   }
 };
 
-async function route_(b, env) {
+async function route_(b, env, request) {
   const a = b.action;
 
-  if (a === 'login') return await login_(env.DB, env, b);
+  if (a === 'login') return await login_(env.DB, env, b, request);
   if (a === 'logout') return await logout_(env.DB, b);
 
   const user = await auth_(env.DB, b.token);
