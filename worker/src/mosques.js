@@ -68,6 +68,11 @@ export async function saveMosque_(db, user, b, isNew) {
     'UPDATE mosques SET name = ?, mujawra = ?, address = ?, permanent_khatib_id = ?, active = ? WHERE id = ?',
     name, mujawra, b.address || '', pk ? pk : null, active, b.id
   );
+
+  if (isTrue_(existing.active) && !active) {
+    await deactivateMosque_(db, user, b.id);
+  }
+
   return ok_({ id: b.id });
 }
 
@@ -80,23 +85,15 @@ export async function deactivateMosque_(db, user, id) {
   const today = todayIso_();
   const future = await all(db, 'SELECT * FROM assignments WHERE mosque_id = ? AND date >= ?', id, today);
 
-  const cleared = [];
-  let stillAssigned = 0;
-  const stmts = [];
+  const cleared = future.map(a => ({
+    date: a.date,
+    mosqueId: a.mosque_id,
+    khatibId: a.khatib_id || null
+  }));
 
-  for (const a of future) {
-    if (a.khatib_id) {
-      stillAssigned++;
-    } else {
-      stmts.push(db.prepare('UPDATE assignments SET status = ?, updated_by = ?, updated_at = ? WHERE id = ?')
-        .bind('unassigned', user.username, nowIso_(), a.id));
-      cleared.push({ date: a.date, mosqueId: a.mosque_id });
-    }
+  if (future.length) {
+    await run(db, 'DELETE FROM assignments WHERE mosque_id = ? AND date >= ?', id, today);
   }
 
-  if (stmts.length) {
-    await batch(db, stmts);
-  }
-
-  return ok_({ clearedAssignments: cleared, clearedPermanentAt: [], stillAssigned });
+  return ok_({ clearedAssignments: cleared, clearedPermanentAt: [], stillAssigned: 0 });
 }

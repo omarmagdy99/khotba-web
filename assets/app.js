@@ -2,12 +2,13 @@
 
 // ─────────────────────────────────────────── الاتصال بالسيرفر
 
-var _CLIENT_CACHE_TTL_MS = 5 * 60 * 1000; // 5 دقائق
-var _CACHEABLE_ACTIONS = ['listKhatibs', 'listMosques', 'getSettings', 'getSchedule', 'getLoadCounts', 'getKhatibSchedule'];
+var _CLIENT_CACHE_TTL_MS = 60 * 1000; // 60 ثانية
+var _CACHEABLE_ACTIONS = ['listKhatibs', 'listMosques', 'getSettings'];
 var _INVALIDATING_ACTIONS = [
   'createKhatib', 'updateKhatib', 'deactivateKhatib',
   'createMosque', 'updateMosque', 'deactivateMosque',
-  'setPreferences', 'publishRange', 'saveSchedule', 'generateDate', 'regenerateDate'
+  'setPreferences', 'publishRange', 'saveSchedule', 'generateDate', 'regenerateDate',
+  'login'
 ];
 
 function clearClientCache() {
@@ -57,7 +58,7 @@ async function api(action, payload) {
   try {
     json = await res.json();
   } catch (e) {
-    throw new ApiError('INTERNAL', 'رد غير متوقع من السيرفر. راجع سجل Apps Script.');
+    throw new ApiError('INTERNAL', 'رد غير متوقع من السيرفر، حاول تاني.');
   }
 
   if (!json.ok) {
@@ -87,7 +88,7 @@ ApiError.prototype = Object.create(Error.prototype);
 
 function getToken() { return localStorage.getItem('awqaf_token') || ''; }
 function setToken(t) { localStorage.setItem('awqaf_token', t); }
-function clearToken() { localStorage.removeItem('awqaf_token'); localStorage.removeItem('awqaf_name'); }
+function clearToken() { clearClientCache(); localStorage.removeItem('awqaf_token'); localStorage.removeItem('awqaf_name'); }
 function getUserName() { return localStorage.getItem('awqaf_name') || ''; }
 
 function goLogin() {
@@ -110,6 +111,7 @@ async function requireAuth() {
 }
 
 async function logout() {
+  clearClientCache();
   try { await api('logout'); } catch (e) {}
   clearToken();
   location.href = 'index.html';

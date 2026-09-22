@@ -2,7 +2,7 @@
 
 import { all, one, run, batch } from './db.js';
 import { settingsMap_, setSetting_ } from './settings.js';
-import { ok_, err_, isIsoDate_, isFriday_, nowIso_ } from './util.js';
+import { ok_, err_, isIsoDate_, isFriday_, nowIso_, isTrue_ } from './util.js';
 
 export async function getSchedule_(db, date) {
   if (!isIsoDate_(date)) return err_('BAD_REQUEST', 'تاريخ غير صحيح');
@@ -281,6 +281,31 @@ export async function saveSchedule_(db, user, b) {
   if (!isIsoDate_(date)) return err_('BAD_REQUEST', 'تاريخ غير صحيح');
   if (!changes.length) return await getSchedule_(db, date);
 
+  // التحقق من صحة الحالة
+  const VALID_STATUSES = new Set(['confirmed', 'unassigned', 'excused']);
+  for (const c of changes) {
+    if (c.status !== undefined && !VALID_STATUSES.has(c.status)) {
+      return err_('BAD_REQUEST', 'حالة الخطبة غير صحيحة');
+    }
+  }
+
+  // التحقق من وجود ونشاط الخطيب
+  const khatibIdsToCheck = [...new Set(changes.map(c => c.khatibId).filter(Boolean))];
+  if (khatibIdsToCheck.length) {
+    const placeholders = khatibIdsToCheck.map(() => '?').join(',');
+    const foundKhatibs = await all(db, `SELECT id, name, active FROM khatibs WHERE id IN (${placeholders})`, ...khatibIdsToCheck);
+    const foundMap = new Map(foundKhatibs.map(k => [k.id, k]));
+    for (const kid of khatibIdsToCheck) {
+      const k = foundMap.get(kid);
+      if (!k) {
+        return err_('BAD_REQUEST', 'الخطيب غير موجود');
+      }
+      if (!isTrue_(k.active)) {
+        return err_('BAD_REQUEST', 'الخطيب غير نشط: ' + k.name);
+      }
+    }
+  }
+
   const existingRows = await all(db, `
     SELECT a.*, m.name AS mosque_name, m.mujawra
     FROM assignments a
@@ -343,8 +368,20 @@ export async function saveSchedule_(db, user, b) {
   }
 
   // 4. كتابة التعديلات داخل معاملة ذرية واحدة
+  // الخطوة 4أ: تصفير خطيب الصفوف المعدلة لتجنب خطأ الفهرس الفريد عند التبديل
+  // الخطوة 4ب: تطبيق القيم النهائية
   const now = nowIso_();
   const stmts = [];
+
+  for (const c of changes) {
+    const cur = onDate[c.mosqueId];
+    if (!cur) continue;
+    stmts.push(db.prepare(`
+      UPDATE assignments
+      SET khatib_id = NULL
+      WHERE id = ?
+    `).bind(cur.id));
+  }
 
   for (const c of changes) {
     const cur = onDate[c.mosqueId];
@@ -360,7 +397,15 @@ export async function saveSchedule_(db, user, b) {
   }
 
   if (stmts.length) {
-    await batch(db, stmts);
+    try {
+      await batch(db, stmts);
+    } catch (err) {
+      const msg = String(err && err.message || err);
+      if (msg.includes('UNIQUE') || msg.includes('idx_assignments_date_khatib')) {
+        return err_('KHATIB_DOUBLE_BOOKED', 'الخطيب محجوز بالفعل في مسجد آخر في هذا التاريخ');
+      }
+      throw err;
+    }
   }
 
   return await getSchedule_(db, date);
@@ -390,13 +435,14 @@ export async function publicSchedule_(db, date) {
     SELECT 
       a.date,
       a.label,
+      a.status,
       m.name AS mosque,
       m.mujawra,
       k.name AS khatib
     FROM assignments a
     JOIN mosques m ON a.mosque_id = m.id
     LEFT JOIN khatibs k ON a.khatib_id = k.id
-    WHERE a.date >= ? AND a.date <= ?
+    WHERE a.date >= ? AND a.date <= ? AND m.active = 1
     ORDER BY a.date ASC, m.mujawra ASC, m.name ASC
   `, from, to);
 
@@ -417,7 +463,7 @@ export async function publicSchedule_(db, date) {
     .map(r => ({
       mosque: r.mosque,
       mujawra: r.mujawra,
-      khatib: r.khatib || ''
+      khatib: r.status === 'confirmed' ? (r.khatib || '') : ''
     }))
     .sort((x, y) => {
       if (x.mujawra === y.mujawra) {

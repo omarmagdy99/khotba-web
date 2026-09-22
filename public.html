@@ -144,7 +144,7 @@
           return '<div class="table-row">' +
             '<div data-label="المسجد">' + esc(r.mosque) + '</div>' +
             '<div data-label="المجاورة"><span class="area-badge">' + esc(r.mujawra || '—') + '</span></div>' +
-            '<div data-label="الخطيب">' + (r.khatib
+            '<div data-label="الخطيب">' + (r.khatib && String(r.khatib).trim()
               ? esc(r.khatib)
               : '<span class="muted">لم يُحدد بعد</span>') + '</div>' +
             '</div>';

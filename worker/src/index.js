@@ -99,7 +99,7 @@ export default {
       return jsonResponse(err_('BAD_REQUEST', 'طريقة غير مدعومة: ' + request.method));
     } catch (err) {
       console.error('Unhandled Worker Error:', err.stack || String(err));
-      return jsonResponse(err_('INTERNAL', String(err && err.message || err)));
+      return jsonResponse(err_('INTERNAL', 'حصل خطأ غير متوقع في السيرفر، حاول تاني'));
     }
   }
 };

@@ -383,6 +383,32 @@
       }
     }
 
+    function onKhatibChange(mosqueId, val) {
+      var row = state.rows.filter(function (r) { return r.mosqueId === mosqueId; })[0];
+      if (!row) return;
+      var cur = effective(row);
+
+      // إذا تم اختيار خطيب وكان محجوزاً في مسجد آخر بنفس الجمعة، يتم إلغاء إسناده من المسجد السابق
+      if (val) {
+        var booked = bookedMap(mosqueId);
+        var oldMosqueId = booked[val];
+        if (oldMosqueId && oldMosqueId !== mosqueId) {
+          var oldRow = state.rows.filter(function (r) { return r.mosqueId === oldMosqueId; })[0];
+          if (oldRow) {
+            state.dirty[oldMosqueId] = { khatibId: '', status: 'unassigned' };
+            if (state.dirty[oldMosqueId].khatibId === oldRow.khatibId && state.dirty[oldMosqueId].status === oldRow.status) {
+              delete state.dirty[oldMosqueId];
+            }
+          }
+        }
+      }
+
+      state.dirty[mosqueId] = { khatibId: val, status: val ? (cur.status === 'excused' ? 'excused' : 'confirmed') : 'unassigned' };
+      if (state.dirty[mosqueId].khatibId === row.khatibId && state.dirty[mosqueId].status === row.status) delete state.dirty[mosqueId];
+      
+      render();
+    }
+
     function wire() {
       el('emptyBtn').onclick = function () { state.filterEmpty = !state.filterEmpty; render(); };
       var ab = el('allBtn');
@@ -450,55 +476,13 @@
               }
             },
             onChange: function (val) {
-              var id = sel.dataset.mosque;
-              var row = state.rows.filter(function (r) { return r.mosqueId === id; })[0];
-              var cur = effective(row);
-
-              // إذا تم اختيار خطيب وكان محجوزاً في مسجد آخر بنفس الجمعة، يتم إلغاء إسناده من المسجد السابق
-              if (val) {
-                var booked = bookedMap(id);
-                var oldMosqueId = booked[val];
-                if (oldMosqueId && oldMosqueId !== id) {
-                  var oldRow = state.rows.filter(function (r) { return r.mosqueId === oldMosqueId; })[0];
-                  if (oldRow) {
-                    state.dirty[oldMosqueId] = { khatibId: '', status: 'unassigned' };
-                    if (state.dirty[oldMosqueId].khatibId === oldRow.khatibId && state.dirty[oldMosqueId].status === oldRow.status) {
-                      delete state.dirty[oldMosqueId];
-                    }
-                  }
-                }
-              }
-
-              state.dirty[id] = { khatibId: val, status: val ? (cur.status === 'excused' ? 'excused' : 'confirmed') : 'unassigned' };
-              if (state.dirty[id].khatibId === row.khatibId && state.dirty[id].status === row.status) delete state.dirty[id];
-              
-              render();
+              onKhatibChange(sel.dataset.mosque, val);
             }
           });
           window._tomSelectInstances.push(ts);
         } else {
           sel.onchange = function () {
-            var id = this.dataset.mosque;
-            var row = state.rows.filter(function (r) { return r.mosqueId === id; })[0];
-            var cur = effective(row);
-            
-            if (this.value) {
-              var booked = bookedMap(id);
-              var oldMosqueId = booked[this.value];
-              if (oldMosqueId && oldMosqueId !== id) {
-                var oldRow = state.rows.filter(function (r) { return r.mosqueId === oldMosqueId; })[0];
-                if (oldRow) {
-                  state.dirty[oldMosqueId] = { khatibId: '', status: 'unassigned' };
-                  if (state.dirty[oldMosqueId].khatibId === oldRow.khatibId && state.dirty[oldMosqueId].status === oldRow.status) {
-                    delete state.dirty[oldMosqueId];
-                  }
-                }
-              }
-            }
-
-            state.dirty[id] = { khatibId: this.value, status: this.value ? (cur.status === 'excused' ? 'excused' : 'confirmed') : 'unassigned' };
-            if (state.dirty[id].khatibId === row.khatibId && state.dirty[id].status === row.status) delete state.dirty[id];
-            render();
+            onKhatibChange(this.dataset.mosque, this.value);
           };
         }
       });
@@ -630,6 +614,7 @@
       el('reloadBtn').onclick = function () { state.dirty = {}; load(state.date); };
       el('forceBtn').onclick = async function () {
         try {
+          clearClientCache();
           var fresh = await api('getSchedule', { date: state.date });
           var d = await api('saveSchedule', { date: state.date, version: fresh.version, changes: changes });
           state.rows = d.rows; state.version = d.version; state.dirty = {};

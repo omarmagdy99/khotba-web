@@ -43,10 +43,19 @@ export async function saveKhatib_(db, user, b, isNew) {
     return err_('BAD_REQUEST', 'رقم الموبايل لازم يكون 11 رقم ويبدأ بـ 01');
   }
 
+  if (rawPhone) {
+    const clash = isNew
+      ? await one(db, 'SELECT id, name FROM khatibs WHERE phone = ?', rawPhone)
+      : await one(db, 'SELECT id, name FROM khatibs WHERE phone = ? AND id != ?', rawPhone, b.id);
+    if (clash) {
+      return err_('DUPLICATE', 'رقم الموبايل ده مسجل بالفعل للخطيب: ' + clash.name);
+    }
+  }
+
   const type = b.type === 'volunteer' ? 'volunteer' : 'primary';
-  const allKhatibs = await all(db, 'SELECT id, name FROM khatibs');
 
   if (isNew) {
+    const allKhatibs = await all(db, 'SELECT id, name FROM khatibs');
     const id = await nextId_(db, 'next_khatib_seq', 'K');
     const now = nowIso_();
     await run(db,
@@ -70,6 +79,11 @@ export async function saveKhatib_(db, user, b, isNew) {
     'UPDATE khatibs SET name = ?, phone = ?, type = ?, notes = ?, active = ? WHERE id = ?',
     name, rawPhone, type, b.notes || '', active, b.id
   );
+
+  if (isTrue_(existing.active) && !active) {
+    await deactivateKhatib_(db, user, b.id);
+  }
+
   return ok_({ id: b.id });
 }
 
