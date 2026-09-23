@@ -33,6 +33,14 @@
         <input type="date" id="publishTo">
       </div>
 
+      <div class="field" style="margin:0;grid-column:1/-1">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;margin-bottom:4px">
+          <input type="checkbox" id="hideEmptyToggle" style="width:auto">
+          إخفاء المساجد اللي مالهاش خطيب
+        </label>
+        <span style="font-size:0.85em;color:var(--muted);display:block">يتم تطبيق هذا التغيير على الصفحة العامة بعد الضغط على "نشر الجدول"</span>
+      </div>
+
       <div style="display:flex;gap:10px;align-items:end;grid-column:1/-1" id="publishActions">
         <button class="btn btn-ok" id="publishBtn" style="flex:1">📢 نشر الجدول</button>
         <button class="btn btn-danger" id="unpublishBtn">إلغاء النشر</button>
@@ -78,6 +86,10 @@
       try {
         var results = await Promise.all([api('getSettings'), api('listDates')]);
         var settings = results[0].settings || {};
+
+        if (el('hideEmptyToggle')) {
+          el('hideEmptyToggle').checked = settings.publish_hide_empty === '1';
+        }
 
         generated = {};
         (results[1].dates || []).forEach(function (d) { generated[d.date] = d; });
@@ -252,6 +264,8 @@
       await loadPreviewForDate(dIso);
     }
 
+    var currentPreviewRows = [];
+
     async function loadPreviewForDate(dIso) {
       var previewBox = el('previewContainer');
       showLoading(previewBox, 'جاري تحميل معاينة جمعة ' + formatDate(dIso) + '...');
@@ -260,46 +274,101 @@
         var res = await api('getSchedule', { date: dIso });
         if (dIso !== activePreviewDate) return; // اتغيّر الاختيار والرد ده قديم
         // نفس ترتيب شاشة التوزيع (رقم المسجد) — السيرفر بيرجّعها مترتبة
-        var rows = res.rows || [];
-
-        if (rows.length === 0) {
-          showEmpty(previewBox, 'لم يتم توليد توزيع لهذه الجمعة بعد (' + formatDate(dIso) + ')');
-          return;
-        }
-
-        var cols = 'grid-template-columns: 50px 2fr 1.2fr 2fr;';
-        var html = '<div style="background:#fff; padding:18px; border-radius:18px; border:1px solid var(--line);">' +
-          '<div style="margin-bottom:14px; text-align:center;">' +
-            '<h3 style="color:var(--navy); font-size:1.15em">جدول خطب الجمعة — ' + esc(formatDate(dIso)) + '</h3>' +
-            '<p style="color:var(--muted); font-size:.85em">هذه المعاينة توضح تماماً الشكل الذي يظهر للجمهور عند زيارة الرابط العام</p>' +
-          '</div>' +
-          '<div class="table-container">' +
-            '<div class="table-header" style="' + cols + '">' +
-              '<div>#</div>' +
-              '<div>🕌 المسجد</div>' +
-              '<div>📍 المجاورة</div>' +
-              '<div>🎙️ الخطيب</div>' +
-            '</div>';
-
-        rows.forEach(function (r, i) {
-          // للجمهور: المعتذر مايظهرش اسمه، زي الصفحة العامة بالظبط
-          var khatibText = r.status === 'confirmed' && r.khatib && r.khatib.trim()
-            ? '<strong>' + esc(r.khatib) + '</strong>'
-            : '<span class="muted">لم يُحدد بعد</span>';
-
-          html += '<div class="table-row" style="' + cols + '">' +
-            '<div data-label="رقم المسجد"><span class="mosque-no">' + (i + 1) + '</span></div>' +
-            '<div data-label="المسجد"><strong>' + esc(r.mosque) + '</strong></div>' +
-            '<div data-label="المجاورة"><span class="area-badge">' + esc(r.mujawra || '—') + '</span></div>' +
-            '<div data-label="الخطيب">' + khatibText + '</div>' +
-          '</div>';
-        });
-
-        html += '</div></div>';
-        previewBox.innerHTML = html;
+        currentPreviewRows = res.rows || [];
+        renderPreview();
       } catch (e) {
         showError(previewBox, e.message, function () { loadPreviewForDate(dIso); });
       }
+    }
+
+    function renderPreview() {
+      var previewBox = el('previewContainer');
+      if (!currentPreviewRows.length) {
+        showEmpty(previewBox, 'لم يتم توليد توزيع لهذه الجمعة بعد (' + formatDate(activePreviewDate) + ')');
+        return;
+      }
+
+      var hideEmpty = el('hideEmptyToggle') ? el('hideEmptyToggle').checked : false;
+      var visibleRows = currentPreviewRows.filter(function (r) {
+        if (!hideEmpty) return true;
+        return r.status === 'confirmed' && r.khatib && r.khatib.trim();
+      });
+
+      var cols = 'grid-template-columns: 50px 2fr 1.2fr 2fr;';
+      var html = '<div style="background:#fff; padding:18px; border-radius:18px; border:1px solid var(--line);">' +
+        '<div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:14px;">' +
+          '<div>' +
+            '<h3 style="color:var(--navy); font-size:1.15em; margin:0">جدول خطب الجمعة — ' + esc(formatDate(activePreviewDate)) + '</h3>' +
+            '<p style="color:var(--muted); font-size:.85em; margin:4px 0 0 0">هذه المعاينة توضح تماماً الشكل الذي يظهر للجمهور عند زيارة الرابط العام</p>' +
+          '</div>' +
+          '<div style="display:flex; gap:8px">' +
+            '<button type="button" class="btn btn-sm btn-plain" id="previewPdfBtn">📄 PDF</button>' +
+            '<button type="button" class="btn btn-sm btn-plain" id="previewWordBtn">📝 Word</button>' +
+          '</div>' +
+        '</div>';
+
+      if (visibleRows.length === 0) {
+        html += '<div class="state"><span class="state-icon">🔍</span><p>لا توجد مساجد بخطيب مؤكد في هذه الجمعة</p></div></div>';
+        previewBox.innerHTML = html;
+        wirePreviewExport(visibleRows);
+        return;
+      }
+
+      html += '<div class="table-container">' +
+        '<div class="table-header" style="' + cols + '">' +
+          '<div>#</div>' +
+          '<div>🕌 المسجد</div>' +
+          '<div>📍 المجاورة</div>' +
+          '<div>🎙️ الخطيب</div>' +
+        '</div>';
+
+      visibleRows.forEach(function (r, i) {
+        // للجمهور: المعتذر مايظهرش اسمه، زي الصفحة العامة بالظبط
+        var khatibText = r.status === 'confirmed' && r.khatib && r.khatib.trim()
+          ? '<strong>' + esc(r.khatib) + '</strong>'
+          : '<span class="muted">لم يُحدد بعد</span>';
+
+        html += '<div class="table-row" style="' + cols + '">' +
+          '<div data-label="رقم المسجد"><span class="mosque-no">' + (i + 1) + '</span></div>' +
+          '<div data-label="المسجد"><strong>' + esc(r.mosque) + '</strong></div>' +
+          '<div data-label="المجاورة"><span class="area-badge">' + esc(r.mujawra || '—') + '</span></div>' +
+          '<div data-label="الخطيب">' + khatibText + '</div>' +
+        '</div>';
+      });
+
+      html += '</div></div>';
+      previewBox.innerHTML = html;
+      wirePreviewExport(visibleRows);
+    }
+
+    function wirePreviewExport(visibleRows) {
+      var pdfBtn = el('previewPdfBtn');
+      var wordBtn = el('previewWordBtn');
+      var title = 'جدول خطب الجمعة — ' + formatDate(activePreviewDate);
+      var headers = ['المسجد', 'المجاورة', 'الخطيب'];
+      var exportRows = visibleRows.map(function (r) {
+        var khatib = (r.status === 'confirmed' && r.khatib && r.khatib.trim())
+          ? r.khatib
+          : 'لم يُحدد بعد';
+        return [r.mosque || '', r.mujawra || '—', khatib];
+      });
+
+      if (pdfBtn) {
+        pdfBtn.onclick = function () {
+          exportTablePrint(title, headers, exportRows);
+        };
+      }
+      if (wordBtn) {
+        wordBtn.onclick = function () {
+          exportTableWord(title, headers, exportRows, 'جدول-خطب-' + activePreviewDate);
+        };
+      }
+    }
+
+    if (el('hideEmptyToggle')) {
+      el('hideEmptyToggle').addEventListener('change', function () {
+        renderPreview();
+      });
     }
 
     // Publish button action
@@ -317,8 +386,10 @@
       btn.disabled = true;
       btn.textContent = 'جاري النشر...';
 
+      var hideEmpty = el('hideEmptyToggle') ? el('hideEmptyToggle').checked : false;
+
       try {
-        await api('publishRange', { dates: dates });
+        await api('publishRange', { dates: dates, hideEmpty: hideEmpty });
         toast('تم نشر الجدول للجمهور بنجاح 📢', 'ok');
         await loadPublishSettings();
       } catch (e) {

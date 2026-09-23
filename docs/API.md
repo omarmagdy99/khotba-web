@@ -276,14 +276,17 @@ Two caveats that are real:
 ### `publishRange`
 
 ```json
-{ "action": "publishRange", "dates": ["2026-07-31", "2026-08-14"] }
-{ "action": "publishRange", "from": "2026-07-31", "to": "2026-08-28" }
+{ "action": "publishRange", "dates": ["2026-07-31", "2026-08-14"], "hideEmpty": true }
+{ "action": "publishRange", "from": "2026-07-31", "to": "2026-08-28", "hideEmpty": false }
 ```
 
 With `dates`, only those dates are public — a date between them that was not picked stays
 hidden. `publish_dates` holds the list, and `publish_from` / `publish_to` are set to the first
 and last date. With `from` / `to`, the whole range is public and `publish_dates` is cleared.
 An empty `from` (or empty `dates`) unpublishes everything.
+
+Optional boolean `hideEmpty`: when true, stores `'1'` in `settings` under key `publish_hide_empty`
+(otherwise `''`). When unpublishing, `publish_hide_empty` is reset to `''`.
 
 ## The public read
 
@@ -315,6 +318,10 @@ never shows a gap.
 Names, not ids — this response is for humans and must stay trivially renderable. Rows whose
 `khatib_id` is empty are returned with `khatib: ""`; the page shows `لم يُحدد بعد`. Hiding
 them would make a mosque look absent from the directory.
+
+When `publish_hide_empty` setting is `'1'`, rows whose khatib is empty (status not confirmed
+or no khatib assigned) are dropped from the response, and `no` (1..N) is computed after
+that filter so numbers stay contiguous without gaps.
 
 ## Rate and quota reality
 

@@ -12,8 +12,6 @@
   <style>
     /* الأعمدة بتتغير حسب عدد الجُمع السابقة المعروضة، فبتيجي من متغير على الجدول */
     .sched .table-header, .sched .table-row { grid-template-columns: var(--cols); }
-    .sched.no-hist .table-header, .sched.no-hist .table-row { grid-template-columns: var(--cols-base); }
-    .sched.no-hist .hist-cell { display: none; }
     .hist-cell { font-size: .85em; color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
     .table-header .hist-cell { color: #cbd5e1; font-weight: 600; }
     .hist-cell.hist-same { color: #b45309; font-weight: 700; }
@@ -383,6 +381,7 @@
           '<span style="flex:1"></span>' +
           (canEdit() ? '<button class="btn btn-sm btn-plain" id="regenBtn" title="يضيف المساجد الجديدة ويملّي الفاضي بالخطيب الثابت">🔄 إعادة التوليد</button>' : '') +
           '<button class="btn btn-sm btn-plain" id="pdfBtn">📄 استخراج PDF</button>' +
+          '<button class="btn btn-sm btn-plain" id="wordBtn">📝 Word</button>' +
           (canEdit() ? '<button class="btn btn-sm" id="saveBtn" disabled>حفظ</button>' : '') +
         '</div>' +
         '<div class="search-box"><span class="search-icon">🔍</span>' +
@@ -792,6 +791,31 @@
       updateStickyBar();
     }
 
+    function getExportData() {
+      var specialLabel = (state.rows && state.rows[0] && state.rows[0].label) ||
+        (el('specialToggle') && el('specialToggle').checked && el('labelInput') ? el('labelInput').value.trim() : '');
+      var title = 'توزيع خطب الجمعة — ' + formatDate(state.date) + (specialLabel ? ' — ' + specialLabel : '');
+      var headers = ['المسجد', 'المجاورة', 'الخطيب'];
+      var exportRows = state.rows.map(function (r) {
+        var m = state.mosques[r.mosqueId] || state.mosques[String(r.mosqueId)] || {};
+        var mosqueName = m.name || r.mosque || '';
+        var mujawra = m.mujawra || r.mujawra || '—';
+        var e = effective(r);
+        var khatibText = '—';
+        if (e.khatibId) {
+          var k = state.khatibs.find(function (x) { return String(x.id) === String(e.khatibId); });
+          var name = k ? k.name : (r.khatib || 'خطيب ' + e.khatibId);
+          if (e.status === 'excused') {
+            khatibText = name + ' (معتذر)';
+          } else {
+            khatibText = name;
+          }
+        }
+        return [mosqueName, mujawra, khatibText];
+      });
+      return { title: title, headers: headers, rows: exportRows };
+    }
+
     function wire() {
       el('emptyBtn').onclick = function () {
         state.filterEmpty = !state.filterEmpty;
@@ -807,16 +831,15 @@
         };
       }
 
-      el('pdfBtn').onclick = async function () {
+      el('pdfBtn').onclick = function () {
         destroyActiveTomSelect();
-        // الـ PDF للجمعة الحالية بس، من غير أعمدة الجُمع السابقة
-        var t = document.querySelector('#pdfArea .sched');
-        if (t) t.classList.add('no-hist');
-        try {
-          await exportPdf(el('pdfArea'), 'توزيع-' + state.date);
-        } finally {
-          if (t) t.classList.remove('no-hist');
-        }
+        var data = getExportData();
+        exportTablePrint(data.title, data.headers, data.rows);
+      };
+      el('wordBtn').onclick = function () {
+        destroyActiveTomSelect();
+        var data = getExportData();
+        exportTableWord(data.title, data.headers, data.rows, 'توزيع-' + state.date);
       };
       var saveBtn = el('saveBtn');
       if (saveBtn) saveBtn.onclick = save;

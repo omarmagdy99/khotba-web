@@ -491,7 +491,11 @@ export async function publishRange_(db, b) {
   await setSetting_(db, 'publish_to', to);
   await setSetting_(db, 'publish_dates', dates.join(','));
 
-  return ok_({ from, to, dates });
+  const isUnpublish = !from || !to;
+  const hideEmptyVal = (!isUnpublish && isTrue_(b.hideEmpty)) ? '1' : '';
+  await setSetting_(db, 'publish_hide_empty', hideEmptyVal);
+
+  return ok_({ from, to, dates, hideEmpty: hideEmptyVal === '1' });
 }
 
 export async function publicSchedule_(db, date) {
@@ -533,15 +537,20 @@ export async function publicSchedule_(db, date) {
 
   const target = date && datesMap.hasOwnProperty(date) ? date : dateList[0].date;
 
+  const hideEmpty = settings.publish_hide_empty === '1';
+
+  let targetRows = inWindow.filter(r => r.date === target);
+  if (hideEmpty) {
+    targetRows = targetRows.filter(r => r.status === 'confirmed' && r.khatib && r.khatib.trim());
+  }
+
   // نفس ترتيب شاشة التوزيع، والرقم مسلسل من 1 عشان القائمة العامة متبقاش فيها فجوات
-  const rows = inWindow
-    .filter(r => r.date === target)
-    .map((r, i) => ({
-      no: i + 1,
-      mosque: r.mosque,
-      mujawra: r.mujawra,
-      khatib: r.status === 'confirmed' ? (r.khatib || '') : ''
-    }));
+  const rows = targetRows.map((r, i) => ({
+    no: i + 1,
+    mosque: r.mosque,
+    mujawra: r.mujawra,
+    khatib: r.status === 'confirmed' ? (r.khatib || '') : ''
+  }));
 
   return ok_({
     published: true,

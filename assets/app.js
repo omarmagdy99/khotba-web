@@ -322,6 +322,288 @@ async function exportPdf(node, filename) {
   }
 }
 
+// ─────────────────────────────────────────── تصدير الجداول (طباعة / PDF و Word)
+
+/*
+ * حسابات تناسب حجم الخط والمسافات (Font size & cell padding arithmetic):
+ * - مقاس صفحة A4 رأسي: 297mm ارتفاع × 210mm عرض.
+ * - الهوامش المحددة: @page { size: A4; margin: 10mm; } (فوق وتحت 10mm)
+ *   -> الارتفاع المتاح للطباعة في الصفحة الواحدة = 297 - 20 = 277mm (~785pt حيث 1mm ≈ 2.83465pt).
+ * - صفحتان كحد أقصى: 2 × 785pt = 1570pt إجمالي الارتفاع القابل للاستخدام.
+ * - لعدد صفوف واقعي يقارب 85 صفاً:
+ *   تتوزع الصفوف على صفحتين: ~43 صفاً في الصفحة الأولى و42 في الصفحة الثانية.
+ *   الصفحة الأولى:
+ *     - عنوان الصفحة h1: خط 14pt + هامش سفلي 6mm (~17pt) = ~34pt.
+ *     - رأس الجدول thead (مكرر): خط 11pt + بادنج 2px فوق وتحت + بوردر = ~19pt.
+ *     - الارتفاع المتبقي لصفوف الصفحة الأولى = 785 - (34 + 19) = 732pt.
+ *     - الارتفاع المتاح لكل صف = 732pt / 43 صف ≈ 17.02pt.
+ *     - عند خط 11pt (line-height: 1.15 = 12.65pt) وبادنج 2px (~1.5pt فوق وتحت = 3pt) وبوردر 1pt:
+ *       ارتفاع الصف = 12.65 + 3 + 1 = 16.65pt (أقل من 17.02pt المتاح).
+ *       43 صفاً × 16.65pt = 715.95pt + 53pt (العنوان والهيدر) = 768.95pt (< 785pt المتاحة).
+ *   الصفحة الثانية:
+ *     - رأس الجدول thead يتكرر تلقائياً عبر (display: table-header-group) = ~19pt.
+ *     - 42 صفاً × 16.65pt = 699.3pt + 19pt = 718.3pt (< 785pt المتاحة).
+ *   النتيجة: 85 صفاً تتسع بدقة تامة في صفحتين دون أن تتسرب إلى صفحة ثالثة نهائياً.
+ * - في حالة عدد صفوف أقل:
+ *   إذا كان N <= 28: يكبر الخط تدريجياً حتى 16pt وبادنج 5pt ليتسع في صفحة واحدة ممتلئة ومقروءة.
+ *   إذا كان N بين 29 و55: خط بين 12pt و14pt ليتسع في صفحتين براحة.
+ *   إذا كان N >= 56: خط يتدرج من 12pt وصولاً إلى 11pt عند 85 صفاً (لا يقل عن 11pt أبداً).
+ */
+function exportTablePrint(title, headers, rows) {
+  toast('اختر "حفظ كـ PDF / Save as PDF" من شاشة الطباعة', 'ok');
+
+  var n = rows.length;
+  var fontSizePt, padYPt, titleSizePt;
+  if (n <= 28) {
+    fontSizePt = Math.round((16 - (Math.max(1, n) - 1) * (3 / 27)) * 10) / 10;
+    fontSizePt = Math.max(13, Math.min(16, fontSizePt));
+    padYPt = 5;
+    titleSizePt = 16;
+  } else if (n <= 55) {
+    fontSizePt = Math.round((14 - (n - 28) * (2 / 27)) * 10) / 10;
+    fontSizePt = Math.max(12, Math.min(14, fontSizePt));
+    padYPt = 4;
+    titleSizePt = 15;
+  } else {
+    fontSizePt = Math.round((12 - (n - 55) * (1 / 30)) * 10) / 10;
+    fontSizePt = Math.max(11, Math.min(12, fontSizePt));
+    padYPt = fontSizePt <= 11.2 ? 2 : 3;
+    titleSizePt = 14;
+  }
+
+  var theadHtml = '<thead><tr>' +
+    headers.map(function (h) {
+      return '<th>' + esc(h) + '</th>';
+    }).join('') +
+    '</tr></thead>';
+
+  var tbodyHtml = '<tbody>' +
+    rows.map(function (row) {
+      return '<tr>' +
+        row.map(function (cell) {
+          return '<td>' + esc(cell) + '</td>';
+        }).join('') +
+        '</tr>';
+    }).join('') +
+    '</tbody>';
+
+  var html = '<!DOCTYPE html>' +
+    '<html dir="rtl" lang="ar">' +
+    '<head>' +
+    '<meta charset="UTF-8">' +
+    '<title>' + esc(title) + '</title>' +
+    '<style>' +
+    '@page { size: A4; margin: 10mm; }' +
+    '@media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }' +
+    '* { box-sizing: border-box; }' +
+    'body { margin: 0; padding: 0; background: #fff; color: #000; font-family: Arial, Tahoma, sans-serif; direction: rtl; }' +
+    'h1 { text-align: center; margin: 0 0 6mm 0; font-size: ' + titleSizePt + 'pt; font-weight: bold; color: #000; }' +
+    'table { width: 100%; border-collapse: collapse; border-spacing: 0; margin: 0; }' +
+    'thead { display: table-header-group; }' +
+    'tr { page-break-inside: avoid; break-inside: avoid; }' +
+    'th, td { border: 1px solid #000; padding: ' + padYPt + 'pt 6pt; font-size: ' + fontSizePt + 'pt; line-height: 1.15; color: #000; }' +
+    'th { font-weight: bold; background: none; text-align: center; }' +
+    'td { text-align: right; }' +
+    '</style>' +
+    '</head>' +
+    '<body>' +
+    '<h1>' + esc(title) + '</h1>' +
+    '<table>' + theadHtml + tbodyHtml + '</table>' +
+    '</body></html>';
+
+  var iframe = document.createElement('iframe');
+  iframe.style.position = 'fixed';
+  iframe.style.right = '0';
+  iframe.style.bottom = '0';
+  iframe.style.width = '0';
+  iframe.style.height = '0';
+  iframe.style.border = '0';
+  iframe.style.visibility = 'hidden';
+  document.body.appendChild(iframe);
+
+  var doc = iframe.contentWindow.document;
+  doc.open();
+  doc.write(html);
+  doc.close();
+
+  var cleaned = false;
+  function cleanup() {
+    if (cleaned) return;
+    cleaned = true;
+    setTimeout(function () {
+      if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+    }, 500);
+  }
+
+  iframe.contentWindow.addEventListener('afterprint', cleanup);
+  setTimeout(cleanup, 60000);
+
+  setTimeout(function () {
+    iframe.contentWindow.focus();
+    iframe.contentWindow.print();
+  }, 250);
+}
+
+var _docxLibrariesPromise = null;
+
+function loadDocxLibraries() {
+  if (typeof docx !== 'undefined' || window.docx) {
+    return Promise.resolve();
+  }
+  if (_docxLibrariesPromise) return _docxLibrariesPromise;
+
+  function loadScript(src) {
+    return new Promise(function (resolve, reject) {
+      var s = document.createElement('script');
+      s.src = src;
+      s.onload = resolve;
+      s.onerror = function () {
+        reject(new Error('Failed to load: ' + src));
+      };
+      document.head.appendChild(s);
+    });
+  }
+
+  _docxLibrariesPromise = loadScript('https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js')
+    .catch(function (err) {
+      _docxLibrariesPromise = null;
+      throw err;
+    });
+
+  return _docxLibrariesPromise;
+}
+
+async function exportTableWord(title, headers, rows, filename) {
+  try {
+    await loadDocxLibraries();
+  } catch (e) {
+    toast('مكتبة Word لم تُحمّل — اتأكد من الإنترنت', 'err');
+    return;
+  }
+  if (!window.docx) {
+    toast('مكتبة Word لم تُحمّل — اتأكد من الإنترنت', 'err');
+    return;
+  }
+
+  toast('جاري تجهيز ملف Word...', 'ok');
+
+  try {
+    var docx = window.docx;
+    var Document = docx.Document;
+    var Packer = docx.Packer;
+    var Paragraph = docx.Paragraph;
+    var TextRun = docx.TextRun;
+    var Table = docx.Table;
+    var TableRow = docx.TableRow;
+    var TableCell = docx.TableCell;
+    var WidthType = docx.WidthType;
+    var BorderStyle = docx.BorderStyle;
+    var AlignmentType = docx.AlignmentType;
+
+    var borderDef = { style: BorderStyle.SINGLE, size: 1, color: '000000' };
+    var borders = {
+      top: borderDef,
+      bottom: borderDef,
+      left: borderDef,
+      right: borderDef,
+      insideHorizontal: borderDef,
+      insideVertical: borderDef
+    };
+
+    var headerRow = new TableRow({
+      tableHeader: true,
+      children: headers.map(function (h) {
+        return new TableCell({
+          children: [
+            new Paragraph({
+              bidirectional: true,
+              alignment: AlignmentType.CENTER,
+              children: [
+                new TextRun({
+                  text: String(h || ''),
+                  bold: true,
+                  font: 'Arial',
+                  size: 24,
+                  rightToLeft: true,
+                  color: '000000'
+                })
+              ]
+            })
+          ]
+        });
+      })
+    });
+
+    var dataRows = rows.map(function (r) {
+      return new TableRow({
+        children: r.map(function (c, colIdx) {
+          return new TableCell({
+            children: [
+              new Paragraph({
+                bidirectional: true,
+                alignment: colIdx === 1 ? AlignmentType.CENTER : AlignmentType.RIGHT,
+                children: [
+                  new TextRun({
+                    text: String(c || ''),
+                    font: 'Arial',
+                    size: 22,
+                    rightToLeft: true,
+                    color: '000000'
+                  })
+                ]
+              })
+            ]
+          });
+        })
+      });
+    });
+
+    var table = new Table({
+      visuallyRightToLeft: true,
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      borders: borders,
+      rows: [headerRow].concat(dataRows)
+    });
+
+    var titlePara = new Paragraph({
+      bidirectional: true,
+      alignment: AlignmentType.CENTER,
+      spacing: { after: 300 },
+      children: [
+        new TextRun({
+          text: String(title || ''),
+          bold: true,
+          font: 'Arial',
+          size: 30,
+          rightToLeft: true,
+          color: '000000'
+        })
+      ]
+    });
+
+    var doc = new Document({
+      sections: [{
+        children: [titlePara, table]
+      }]
+    });
+
+    var blob = await Packer.toBlob(doc);
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = (filename || 'جدول') + '.docx';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () {
+      if (a.parentNode) a.parentNode.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 1000);
+    toast('تم تنزيل ملف Word بنجاح', 'ok');
+  } catch (err) {
+    toast('تعذّر إنشاء ملف Word', 'err');
+  }
+}
+
 // ─────────────────────────────────────────── شاشة التحميل
 
 /**

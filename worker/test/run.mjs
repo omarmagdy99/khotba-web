@@ -468,6 +468,35 @@ async function main() {
       assert(settings.data.settings.publish_dates === '', 'range publish clears picked dates');
     }),
 
+    test('Scenario R: publishRange hideEmpty omits unconfirmed mosques with contiguous 1..N numbers', async () => {
+      // 1. Publish with hideEmpty: true
+      const pubHide = await api({ action: 'publishRange', token, from: fridayDate, to: fridayDate, hideEmpty: true });
+      assert(pubHide.ok, 'publishRange with hideEmpty: true must succeed');
+
+      const settingsHide = await api({ action: 'getSettings', token });
+      assert(settingsHide.data.settings.publish_hide_empty === '1', 'publish_hide_empty is stored as 1');
+
+      const resHide = await (await fetch(`${BASE_URL}/?date=${fridayDate}`)).json();
+      assert(resHide.ok, 'public schedule GET succeeds');
+      assert(resHide.data.rows.length < 4, 'unconfirmed/empty mosque is omitted');
+      assert(!resHide.data.rows.some(r => !r.khatib), 'no empty khatib rows in public GET');
+      const expectedNos = resHide.data.rows.map((_, i) => i + 1).join(',');
+      assert(resHide.data.rows.map(r => r.no).join(',') === expectedNos, 'numbers stay 1..N contiguous');
+
+      // 2. Republish with hideEmpty false/absent
+      const pubShow = await api({ action: 'publishRange', token, from: fridayDate, to: fridayDate });
+      assert(pubShow.ok, 'republish with hideEmpty absent must succeed');
+
+      const settingsShow = await api({ action: 'getSettings', token });
+      assert(settingsShow.data.settings.publish_hide_empty === '', 'publish_hide_empty is reset to empty string');
+
+      const resShow = await (await fetch(`${BASE_URL}/?date=${fridayDate}`)).json();
+      assert(resShow.ok, 'public schedule GET succeeds after republish');
+      assert(resShow.data.rows.length === 4, 'all mosques are back');
+      assert(resShow.data.rows.some(r => !r.khatib), 'unconfirmed/empty mosque is back');
+      assert(resShow.data.rows.map(r => r.no).join(',') === '1,2,3,4', 'numbers stay 1..4 contiguous');
+    }),
+
     test('Scenario 7: deactivated mosque future rows removed and absent from public GET', async () => {
       // Deactivate M004
       const deactM = await api({ action: 'deactivateMosque', token, id: 'M004' });
