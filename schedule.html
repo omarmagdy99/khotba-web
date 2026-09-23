@@ -377,6 +377,7 @@
       el('main').innerHTML =
         '<div class="sticky-bar">' +
           '<button class="btn btn-sm" id="emptyBtn"></button>' +
+          '<button type="button" class="btn btn-plain btn-sm" id="freeKhatibsBtn"></button>' +
           '<button class="btn btn-plain btn-sm" id="allBtn" style="display:none">عرض الكل</button>' +
           '<span style="flex:1"></span>' +
           (canEdit() ? '<button class="btn btn-sm btn-plain" id="regenBtn" title="يضيف المساجد الجديدة ويملّي الفاضي بالخطيب الثابت">🔄 إعادة التوليد</button>' : '') +
@@ -405,6 +406,27 @@
       if (emptyBtn) {
         emptyBtn.className = 'btn ' + (emptyCount ? 'btn-danger' : 'btn-ok') + ' btn-sm';
         emptyBtn.textContent = emptyCount ? ('متبقي بدون خطيب: ' + emptyCount) : 'كل المساجد متوزعة ✓';
+      }
+
+      var freeBtn = el('freeKhatibsBtn');
+      if (freeBtn) {
+        if (!state.rows || !state.rows.length) {
+          freeBtn.style.display = 'none';
+        } else {
+          freeBtn.style.display = '';
+          var confirmedKhatibIds = new Set();
+          state.rows.forEach(function (r) {
+            var eff = effective(r);
+            if (eff.khatibId && eff.status === 'confirmed') {
+              confirmedKhatibIds.add(String(eff.khatibId));
+            }
+          });
+          var khatibs = state.khatibs || [];
+          var freeCount = khatibs.filter(function (k) {
+            return !confirmedKhatibIds.has(String(k.id));
+          }).length;
+          freeBtn.textContent = 'خطباء بدون خطبة: ' + freeCount;
+        }
       }
 
       var allBtn = el('allBtn');
@@ -822,6 +844,13 @@
         updateStickyBar();
         applyFilters();
       };
+      var freeBtn = el('freeKhatibsBtn');
+      if (freeBtn) {
+        freeBtn.onclick = function () {
+          if (!confirmLeave()) return;
+          location.href = 'free-khatibs.html?date=' + encodeURIComponent(state.date);
+        };
+      }
       var ab = el('allBtn');
       if (ab) {
         ab.onclick = function () {

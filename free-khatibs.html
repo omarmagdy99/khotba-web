@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>الخطباء بدون خطبة — أوقاف 15 مايو</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.rtl.min.css">
+  <link rel="stylesheet" href="assets/style.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</head>
+<body>
+  <div id="nav"></div>
+  <div class="container">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:16px">
+      <a href="schedule.html" class="btn btn-plain btn-sm" style="text-decoration:none;display:inline-flex;align-items:center;gap:4px">← رجوع للتوزيع</a>
+      <div style="display:flex;align-items:center;gap:8px">
+        <label for="dateInput" style="font-weight:600;font-size:.9em;margin:0">التاريخ:</label>
+        <input type="date" id="dateInput" style="padding:6px 12px;border:2px solid var(--line);border-radius:12px;font-family:inherit;font-size:.9em">
+      </div>
+    </div>
+
+    <h1 style="display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap">
+      <span>🎙️</span>
+      <span id="headingTitle">الخطباء بدون خطبة</span>
+      <span class="total-badge" id="countBadge" style="display:none">0</span>
+    </h1>
+
+    <div class="search-box">
+      <span class="search-icon">🔍</span>
+      <input type="text" id="searchInput" class="search-input" placeholder="ابحث باسم الخطيب...">
+      <button id="clearSearchBtn" class="clear-btn">✕</button>
+    </div>
+
+    <div class="stats-bar" id="actionsBar" style="display:none">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span>العدد: </span><strong id="statsCount">0</strong>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button type="button" class="btn btn-plain btn-sm" id="exportPdfBtn">📄 PDF</button>
+        <button type="button" class="btn btn-plain btn-sm" id="exportWordBtn">📝 Word</button>
+      </div>
+    </div>
+
+    <div id="results"></div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="config.js"></script>
+  <script src="assets/app.js"></script>
+  <script>
+    renderNav('schedule.html');
+
+    var currentDate = '';
+    var allFreeKhatibs = [];
+    var currentFiltered = [];
+    var isGenerated = false;
+
+    (async function () {
+      if (!await requireAuth()) return;
+      initDate();
+      await loadData();
+      appReady();
+    })();
+
+    function initDate() {
+      var params = new URLSearchParams(window.location.search);
+      currentDate = params.get('date') || '';
+      if (!currentDate) {
+        var fridays = nextFridays(1);
+        currentDate = fridays[0] || todayIso();
+      }
+      el('dateInput').value = currentDate;
+    }
+
+    el('dateInput').addEventListener('change', function () {
+      var val = this.value;
+      if (!val) return;
+      currentDate = val;
+      var url = new URL(window.location.href);
+      url.searchParams.set('date', val);
+      window.history.replaceState({}, '', url.toString());
+      loadData();
+    });
+
+    var searchInput = el('searchInput');
+    var clearBtn = el('clearSearchBtn');
+
+    searchInput.addEventListener('input', function () {
+      clearBtn.classList.toggle('show', !!this.value);
+      applyFilter();
+    });
+
+    clearBtn.addEventListener('click', function () {
+      searchInput.value = '';
+      clearBtn.classList.remove('show');
+      applyFilter();
+      searchInput.focus();
+    });
+
+    async function loadData() {
+      var targetDate = currentDate;
+      el('headingTitle').textContent = 'الخطباء بدون خطبة — ' + formatDate(targetDate);
+      el('countBadge').style.display = 'none';
+      el('actionsBar').style.display = 'none';
+      showLoading(el('results'), 'جاري تحميل البيانات...');
+
+      try {
+        var results = await Promise.all([
+          api('getSchedule', { date: targetDate }),
+          api('listKhatibs')
+        ]);
+
+        if (currentDate !== targetDate) return;
+
+        var schedRes = results[0];
+        var khatibRes = results[1];
+
+        if (!schedRes.exists) {
+          isGenerated = false;
+          allFreeKhatibs = [];
+          currentFiltered = [];
+          el('countBadge').textContent = '0';
+          el('countBadge').style.display = 'inline-block';
+          el('actionsBar').style.display = 'none';
+          showEmpty(el('results'), 'لم يتم إنشاء جدول هذا التاريخ في شاشة التوزيع بعد');
+          return;
+        }
+
+        isGenerated = true;
+
+        var confirmedKhatibIds = new Set();
+        var excusedMosquesByKhatib = {};
+
+        (schedRes.rows || []).forEach(function (r) {
+          var kId = String(r.khatibId || '');
+          if (!kId) return;
+          if (r.status === 'confirmed') {
+            confirmedKhatibIds.add(kId);
+          } else if (r.status === 'excused') {
+            var mName = r.mosque || ('مسجد ' + r.mosqueId);
+            if (!excusedMosquesByKhatib[kId]) {
+              excusedMosquesByKhatib[kId] = mName;
+            } else {
+              excusedMosquesByKhatib[kId] += '، ' + mName;
+            }
+          }
+        });
+
+        var activeKhatibs = (khatibRes.khatibs || []).filter(function (k) {
+          return k.active !== false && k.active !== 0;
+        });
+
+        allFreeKhatibs = [];
+        activeKhatibs.forEach(function (k) {
+          var kId = String(k.id || '');
+          if (confirmedKhatibIds.has(kId)) return;
+
+          var note = '';
+          if (excusedMosquesByKhatib[kId]) {
+            note = 'معتذر عن ' + excusedMosquesByKhatib[kId];
+          }
+
+          allFreeKhatibs.push({
+            id: k.id,
+            name: k.name || '',
+            phone: k.phone || '',
+            type: k.type || 'primary',
+            note: note
+          });
+        });
+
+        allFreeKhatibs.sort(function (a, b) {
+          return (a.name || '').localeCompare(b.name || '', 'ar');
+        });
+
+        el('countBadge').textContent = allFreeKhatibs.length;
+        el('countBadge').style.display = 'inline-block';
+
+        applyFilter();
+      } catch (e) {
+        if (currentDate !== targetDate) return;
+        showError(el('results'), e.message, function () { loadData(); });
+      }
+    }
+
+    function applyFilter() {
+      if (!isGenerated) return;
+
+      var query = (el('searchInput').value || '').trim();
+      currentFiltered = allFreeKhatibs.filter(function (k) {
+        return !query || matches(k.name, query);
+      });
+
+      el('statsCount').textContent = query
+        ? (currentFiltered.length + ' من ' + allFreeKhatibs.length)
+        : allFreeKhatibs.length;
+
+      if (allFreeKhatibs.length === 0) {
+        el('actionsBar').style.display = 'none';
+        showEmpty(el('results'), 'جميع الخطباء لديهم خطب في هذا التاريخ ✓');
+        return;
+      }
+
+      el('actionsBar').style.display = 'flex';
+
+      if (currentFiltered.length === 0) {
+        showEmpty(el('results'), 'لا توجد نتائج مطابقة للبحث');
+        return;
+      }
+
+      renderTable(currentFiltered);
+    }
+
+    function renderTable(rows) {
+      var html = '<div class="table-container">' +
+        '<div class="table-header" style="grid-template-columns: 2fr 1.5fr 1fr 2fr;">' +
+          '<div>الخطيب</div>' +
+          '<div>الموبايل</div>' +
+          '<div>النوع</div>' +
+          '<div>ملاحظة</div>' +
+        '</div>';
+
+      rows.forEach(function (k) {
+        var typeBadge = '<span class="badge ' + (k.type === 'primary' ? 'badge-primary' : 'badge-volunteer') + '">' +
+          (k.type === 'primary' ? 'أساسي' : 'متطوع') + '</span>';
+        var phoneHtml = k.phone && k.phone.trim()
+          ? '<span class="mono" dir="ltr">' + esc(k.phone) + '</span>'
+          : '<span class="muted">—</span>';
+        var noteHtml = k.note
+          ? '<span class="badge badge-warn">' + esc(k.note) + '</span>'
+          : '<span class="muted">—</span>';
+
+        html += '<div class="table-row" style="grid-template-columns: 2fr 1.5fr 1fr 2fr;">' +
+          '<div data-label="الخطيب"><strong>' + esc(k.name) + '</strong></div>' +
+          '<div data-label="الموبايل">' + phoneHtml + '</div>' +
+          '<div data-label="النوع">' + typeBadge + '</div>' +
+          '<div data-label="ملاحظة">' + noteHtml + '</div>' +
+        '</div>';
+      });
+
+      html += '</div>';
+      el('results').innerHTML = html;
+    }
+
+    function getExportData() {
+      var title = 'الخطباء بدون خطبة — ' + formatDate(currentDate);
+      var headers = ['الخطيب', 'الموبايل', 'النوع', 'ملاحظة'];
+      var exportRows = currentFiltered.map(function (k) {
+        return [
+          k.name || '',
+          k.phone || '',
+          k.type === 'primary' ? 'أساسي' : 'متطوع',
+          k.note || ''
+        ];
+      });
+      return { title: title, headers: headers, rows: exportRows };
+    }
+
+    el('exportPdfBtn').addEventListener('click', function () {
+      var data = getExportData();
+      if (!data.rows.length) {
+        toast('لا توجد بيانات للتصدير', 'warn');
+        return;
+      }
+      exportTablePrint(data.title, data.headers, data.rows);
+    });
+
+    el('exportWordBtn').addEventListener('click', function () {
+      var data = getExportData();
+      if (!data.rows.length) {
+        toast('لا توجد بيانات للتصدير', 'warn');
+        return;
+      }
+      exportTableWord(data.title, data.headers, data.rows, 'الخطباء-بدون-خطبة-' + currentDate);
+    });
+  </script>
+</body>
+</html>

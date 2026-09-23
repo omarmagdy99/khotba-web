@@ -12,6 +12,7 @@ fs.mkdirSync(dist, { recursive: true });
 const htmlFiles = [
   'index.html',
   'khatib-schedule.html',
+  'free-khatibs.html',
   'khatibs.html',
   'mosques.html',
   'public.html',
