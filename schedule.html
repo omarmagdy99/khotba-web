@@ -47,6 +47,29 @@
       padding: 10px 0; border-bottom: 1px solid var(--line); margin-bottom: 12px;
       display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
     }
+    .save-status {
+      font-size: .88em;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .save-status.saving { color: var(--muted); }
+    .save-status.saved { color: var(--ok); }
+    .save-status.error { color: var(--err); }
+    .save-status .btn-retry {
+      padding: 3px 10px;
+      font-size: .82em;
+      border-radius: 50px;
+      background: var(--err);
+      color: #fff;
+      border: none;
+      cursor: pointer;
+      font-family: inherit;
+      font-weight: 600;
+      transition: all .2s;
+    }
+    .save-status .btn-retry:hover { filter: brightness(1.15); }
   </style>
 </head>
 <body>
@@ -105,7 +128,15 @@
       refPromise: null,  // تحميل المساجد والخطباء — الجدول مايترسمش قبله
       histFrom: '',      // من أي تاريخ نعرض الخطب السابقة ('' = مخفية)
       history: { dates: [], byMosque: {} }, // mosqueId -> date -> { khatibId, khatib, status }
+      staleConflict: null, // تجميد الحفظ التلقائي عند حدوث STALE_WRITE لحد ما المستخدم يختار
     };
+
+    var _autosaveTimer = null;
+    var _inFlight = false;
+    var _inFlightPromise = null;
+    var _needFlushAfterInFlight = false;
+    var _saveStatusState = { status: 'idle', reason: '' };
+    var AUTOSAVE_DELAY = 700;
 
     try { state.histFrom = sessionStorage.getItem('awqaf_hist_from') || ''; } catch (e) {}
     el('histFrom').value = state.histFrom;
@@ -140,12 +171,14 @@
         return '<button class="chip" data-date="' + d + '">' + esc(formatDate(d)) + '</button>';
       }).join('');
       el('fridayChips').querySelectorAll('.chip').forEach(function (c) {
-        c.onclick = function () {
-          if (!confirmLeave()) return;
-          el('dateInput').value = c.dataset.date;
+        c.onclick = async function () {
+          var targetDate = c.dataset.date;
+          if (targetDate === state.date) return;
+          if (!await flushOrConfirm()) return;
+          el('dateInput').value = targetDate;
           el('specialToggle').checked = false;
           el('labelField').style.display = 'none';
-          load(c.dataset.date);
+          load(targetDate);
         };
       });
     }
@@ -154,24 +187,36 @@
       el('labelField').style.display = this.checked ? 'block' : 'none';
     };
 
-    el('dateInput').onchange = function () {
+    el('dateInput').onchange = async function () {
       var d = this.value;
       if (!d) return;
+      if (d === state.date) return;
       if (!el('specialToggle').checked && !isFriday(d)) {
         toast('اختر يوم جمعة، أو فعّل "مناسبة خاصة"', 'warn');
         return;
       }
-      if (!confirmLeave()) { this.value = state.date; return; }
+      if (!await flushOrConfirm()) { this.value = state.date; return; }
       load(d);
     };
 
+    function hasUnsavedChanges() {
+      return Object.keys(state.dirty).length > 0 || _inFlight || _autosaveTimer !== null;
+    }
+
+    async function flushOrConfirm() {
+      if (!hasUnsavedChanges()) return true;
+      var success = await flushAutosave();
+      if (success && !Object.keys(state.dirty).length) return true;
+      return confirmLeave();
+    }
+
     function confirmLeave() {
-      if (!Object.keys(state.dirty).length) return true;
+      if (!hasUnsavedChanges()) return true;
       return confirmBox('فيه تعديلات لسه متحفظتش. تسيب الصفحة؟');
     }
 
     window.addEventListener('beforeunload', function (e) {
-      if (Object.keys(state.dirty).length) { e.preventDefault(); e.returnValue = ''; }
+      if (hasUnsavedChanges()) { e.preventDefault(); e.returnValue = ''; }
     });
 
     // ── تحميل ────────────────────────────────────────────────
@@ -207,6 +252,13 @@
     }
 
     async function load(date) {
+      if (_autosaveTimer) {
+        clearTimeout(_autosaveTimer);
+        _autosaveTimer = null;
+      }
+      state.staleConflict = null;
+      setSaveStatus('idle');
+
       state.date = date;
       state.dirty = {};
       state.conflictMosques = [];
@@ -383,7 +435,7 @@
           (canEdit() ? '<button class="btn btn-sm btn-plain" id="regenBtn" title="يضيف المساجد الجديدة ويملّي الفاضي بالخطيب الثابت">🔄 إعادة التوليد</button>' : '') +
           '<button class="btn btn-sm btn-plain" id="pdfBtn">📄 استخراج PDF</button>' +
           '<button class="btn btn-sm btn-plain" id="wordBtn">📝 Word</button>' +
-          (canEdit() ? '<button class="btn btn-sm" id="saveBtn" disabled>حفظ</button>' : '') +
+          (canEdit() ? '<span id="saveStatus" class="save-status"></span>' : '') +
         '</div>' +
         '<div class="search-box"><span class="search-icon">🔍</span>' +
           '<input type="text" class="search-input" id="mosqueSearch" placeholder="ابحث باسم المسجد أو المجاورة..." value="' + esc(state.search) + '"></div>' +
@@ -434,16 +486,7 @@
         allBtn.style.display = state.filterEmpty ? 'inline-block' : 'none';
       }
 
-      var saveBtn = el('saveBtn');
-      if (saveBtn) {
-        if (!canEdit()) {
-          saveBtn.style.display = 'none';
-        } else {
-          saveBtn.style.display = '';
-          saveBtn.disabled = !dirtyCount;
-          saveBtn.textContent = 'حفظ' + (dirtyCount ? ' (' + dirtyCount + ')' : '');
-        }
-      }
+      renderSaveStatus();
     }
 
     function applyFilters() {
@@ -571,9 +614,11 @@
 
       rowEl.className = 'table-row' + (isDirty ? ' dirty' : '') + (isEmpty ? ' empty-slot' : '');
 
-      var khatibCell = rowEl.querySelector('[data-label="الخطيب"]');
-      if (khatibCell) {
-        khatibCell.innerHTML = khatibButtonHtml(r, e);
+      if (String(mosqueId) !== String(activeMosqueId)) {
+        var khatibCell = rowEl.querySelector('[data-label="الخطيب"]');
+        if (khatibCell) {
+          khatibCell.innerHTML = khatibButtonHtml(r, e);
+        }
       }
 
       var statusCell = rowEl.querySelector('[data-label="الحالة"]');
@@ -792,6 +837,16 @@
         updateRow(oldMosqueId);
       }
 
+      if (Object.keys(state.dirty).length === 0) {
+        if (_autosaveTimer) {
+          clearTimeout(_autosaveTimer);
+          _autosaveTimer = null;
+        }
+        if (!_inFlight) setSaveStatus('saved');
+      } else {
+        scheduleAutosave();
+      }
+
       setTimeout(function () {
         destroyActiveTomSelect();
         updateStickyBar();
@@ -811,6 +866,16 @@
       }
       updateRow(mosqueId);
       updateStickyBar();
+
+      if (Object.keys(state.dirty).length === 0) {
+        if (_autosaveTimer) {
+          clearTimeout(_autosaveTimer);
+          _autosaveTimer = null;
+        }
+        if (!_inFlight) setSaveStatus('saved');
+      } else {
+        scheduleAutosave();
+      }
     }
 
     function getExportData() {
@@ -846,8 +911,8 @@
       };
       var freeBtn = el('freeKhatibsBtn');
       if (freeBtn) {
-        freeBtn.onclick = function () {
-          if (!confirmLeave()) return;
+        freeBtn.onclick = async function () {
+          if (!await flushOrConfirm()) return;
           location.href = 'free-khatibs.html?date=' + encodeURIComponent(state.date);
         };
       }
@@ -870,8 +935,6 @@
         var data = getExportData();
         exportTableWord(data.title, data.headers, data.rows, 'توزيع-' + state.date);
       };
-      var saveBtn = el('saveBtn');
-      if (saveBtn) saveBtn.onclick = save;
       var regenBtn = el('regenBtn');
       if (regenBtn) regenBtn.onclick = regenerate;
 
@@ -889,7 +952,10 @@
      * من غير ما يلمس أي توزيع يدوي، و"تصفير" بيمسح التوزيع كله ويرجّع
      * الثابتين بس. التصفير بيتأكد مرتين لأنه بيضيّع شغل.
      */
-    function regenerate() {
+    async function regenerate() {
+      if (hasUnsavedChanges()) {
+        await flushAutosave();
+      }
       if (Object.keys(state.dirty).length) {
         toast('احفظ تعديلاتك الأول أو ارجع عنها', 'warn');
         return;
@@ -951,44 +1017,247 @@
       }
     }
 
-    // ── الحفظ ────────────────────────────────────────────────
+    // ── الحفظ التلقائي ───────────────────────────────────────
 
-    async function save() {
-      var changes = Object.keys(state.dirty).map(function (id) {
-        return { mosqueId: id, khatibId: state.dirty[id].khatibId, status: state.dirty[id].status };
-      });
-      if (!changes.length) return;
+    function setSaveStatus(status, reason) {
+      _saveStatusState = { status: status, reason: reason || '' };
+      renderSaveStatus();
+    }
 
-      var btn = el('saveBtn');
-      btn.disabled = true;
-      btn.textContent = 'جاري الحفظ...';
+    function renderSaveStatus() {
+      if (!canEdit()) return;
+      var statusEl = el('saveStatus');
+      if (!statusEl) return;
 
+      if (_saveStatusState.status === 'saving') {
+        statusEl.className = 'save-status saving';
+        statusEl.innerHTML = 'جاري الحفظ…';
+      } else if (_saveStatusState.status === 'saved') {
+        statusEl.className = 'save-status saved';
+        statusEl.innerHTML = '✓ تم الحفظ';
+      } else if (_saveStatusState.status === 'error') {
+        statusEl.className = 'save-status error';
+        statusEl.innerHTML = '<span>لم يُحفظ — ' + esc(_saveStatusState.reason) + '</span>' +
+          ' <button type="button" class="btn-retry" id="retrySaveBtn">إعادة المحاولة</button>';
+        var retryBtn = el('retrySaveBtn');
+        if (retryBtn) {
+          retryBtn.onclick = function () {
+            if (state.staleConflict) {
+              var n = el('dateNotice');
+              if (n && n.scrollIntoView) n.scrollIntoView({ behavior: 'smooth' });
+              return;
+            }
+            flushAutosave();
+          };
+        }
+      } else {
+        statusEl.className = 'save-status';
+        statusEl.innerHTML = '';
+      }
+    }
+
+    function scheduleAutosave() {
+      if (!canEdit()) return;
+      if (state.staleConflict) return; // توقف الحفظ التلقائي لحين اختيار المستخدم
+      setSaveStatus('saving');
+      if (_autosaveTimer) clearTimeout(_autosaveTimer);
+      _autosaveTimer = setTimeout(function () {
+        _autosaveTimer = null;
+        flushAutosave();
+      }, AUTOSAVE_DELAY);
+    }
+
+    async function flushAutosave() {
+      if (!canEdit()) return true;
+
+      if (_autosaveTimer) {
+        clearTimeout(_autosaveTimer);
+        _autosaveTimer = null;
+      }
+
+      if (state.staleConflict) return false;
+
+      if (_inFlight) {
+        _needFlushAfterInFlight = true;
+        try {
+          await _inFlightPromise;
+        } catch (e) {}
+        if (Object.keys(state.dirty).length > 0 && !state.staleConflict) {
+          return await flushAutosave();
+        }
+        return Object.keys(state.dirty).length === 0;
+      }
+
+      if (!Object.keys(state.dirty).length) {
+        if (_saveStatusState.status === 'saving') {
+          setSaveStatus('saved');
+        }
+        return true;
+      }
+
+      _inFlight = true;
+      setSaveStatus('saving');
+
+      _inFlightPromise = _performSave();
       try {
-        var d = await api('saveSchedule', { date: state.date, version: state.version, changes: changes });
-        state.rows = d.rows;
+        return await _inFlightPromise;
+      } finally {
+        _inFlight = false;
+        _inFlightPromise = null;
+        if (_needFlushAfterInFlight) {
+          _needFlushAfterInFlight = false;
+          if (Object.keys(state.dirty).length > 0 && !state.staleConflict) {
+            flushAutosave();
+          }
+        }
+      }
+    }
+
+    async function _performSave() {
+      // أخذ لقطة من التعديلات الحالية لإرسالها
+      var snapshot = {};
+      var changes = [];
+      for (var id in state.dirty) {
+        if (state.dirty.hasOwnProperty(id)) {
+          var entry = state.dirty[id];
+          snapshot[id] = { khatibId: entry.khatibId, status: entry.status };
+          changes.push({
+            mosqueId: id,
+            khatibId: entry.khatibId,
+            status: entry.status
+          });
+        }
+      }
+
+      if (!changes.length) {
+        setSaveStatus('saved');
+        return true;
+      }
+
+      var sentDate = state.date;
+      try {
+        var d = await api('saveSchedule', {
+          date: sentDate,
+          version: state.version,
+          changes: changes
+        });
+
+        // الحفظ نجح، بس المستخدم راح لتاريخ تاني والرد ده يخص التاريخ القديم
+        if (state.date !== sentDate) return true;
+
+        // 1. تحديث النسخة
         state.version = d.version;
-        state.dirty = {};
-        toast('تم حفظ ' + changes.length + ' تعديل', 'ok');
-        await refreshLoadCounts();
-        render();
+
+        // 2. مسح التعديلات التي نجح حفظها ولم تتغير أثناء الإرسال
+        for (var snapId in snapshot) {
+          if (snapshot.hasOwnProperty(snapId)) {
+            var cur = state.dirty[snapId];
+            if (cur && cur.khatibId === snapshot[snapId].khatibId && cur.status === snapshot[snapId].status) {
+              delete state.dirty[snapId];
+            }
+          }
+        }
+
+        // 3. تحديد الصفوف المتأثرة لدمجها وتحديثها
+        var affectedMosques = new Set();
+        for (var sId in snapshot) {
+          if (snapshot.hasOwnProperty(sId)) {
+            affectedMosques.add(String(sId));
+          }
+        }
+
+        (d.rows || []).forEach(function (serverRow) {
+          var sMosqueId = String(serverRow.mosqueId);
+          var idx = state.rows.findIndex(function (r) {
+            return String(r.mosqueId) === sMosqueId;
+          });
+
+          if (idx >= 0) {
+            var localRow = state.rows[idx];
+            var isServerDifferent = (
+              String(localRow.khatibId || '') !== String(serverRow.khatibId || '') ||
+              localRow.status !== serverRow.status ||
+              localRow.khatib !== serverRow.khatib ||
+              localRow.label !== serverRow.label
+            );
+            state.rows[idx] = Object.assign({}, localRow, serverRow);
+
+            var isLocallyDirty = !!(state.dirty[sMosqueId] || state.dirty[serverRow.mosqueId]);
+            if (isServerDifferent && !isLocallyDirty) {
+              affectedMosques.add(sMosqueId);
+            }
+          } else {
+            state.rows.push(serverRow);
+            affectedMosques.add(sMosqueId);
+          }
+        });
+
+        // 4. إزالة أي علامات تعارض سابقة
+        var prevConflicts = state.conflictMosques || [];
+        state.conflictMosques = [];
+        prevConflicts.forEach(function (cId) {
+          var sel = document.querySelector('.table-row[data-mosque="' + cId + '"] .row-select');
+          if (sel) sel.classList.remove('conflict');
+        });
+
+        // 5. تحديث الصفوف المتأثرة وشريط الإحصائيات بدون استدعاء render() كامل
+        affectedMosques.forEach(function (mId) {
+          updateRow(mId);
+        });
+        updateStickyBar();
+        if (state.filterEmpty) {
+          applyFilters();
+        }
+
+        // 6. تحديث عدد الخطب في الخلفية بدون تعطيل
+        refreshLoadCounts();
+
+        // 7. إشعار النجاح وحالة الحفظ
+        toast('تم الحفظ', 'ok');
+
+        if (Object.keys(state.dirty).length > 0) {
+          setSaveStatus('saving');
+          scheduleAutosave();
+        } else {
+          setSaveStatus('saved');
+        }
+
+        return true;
       } catch (e) {
-        if (e.code === 'STALE_WRITE') return handleStale(e, changes);
+        if (state.date !== sentDate) return false;
+        if (e.code === 'STALE_WRITE') {
+          setSaveStatus('error', e.message || 'حد تاني عدّل نفس الصفوف دي');
+          handleStale(e, changes);
+          return false;
+        }
 
         if (e.code === 'KHATIB_DOUBLE_BOOKED') {
           var d2 = e.details || {};
-          highlight(d2.mosques || [d2.conflictMosqueId]);
+          var conflictIds = d2.mosques || (d2.conflictMosqueId ? [d2.conflictMosqueId] : []);
+          highlight(conflictIds);
+          setSaveStatus('error', e.message);
+          toast(e.message, 'err');
+          return false;
         }
+
+        // خطأ اتصال أو خطأ آخر
+        setSaveStatus('error', e.message || 'تعذّر الاتصال');
         toast(e.message, 'err');
-      } finally {
-        updateStickyBar();
+        return false;
       }
+    }
+
+    async function save() {
+      return await flushAutosave();
     }
 
     /** لا نكتب فوق شغل حد تاني من غير ما نسأل، ولا نرمي شغل المستخدم. */
     function handleStale(e, changes) {
-      var who = (e.details.conflicts || []).map(function (c) {
+      state.staleConflict = { e: e, changes: changes };
+      var conflicts = (e && e.details && e.details.conflicts) ? e.details.conflicts : [];
+      var who = conflicts.map(function (c) {
         var m = state.mosques[c.mosqueId] || {};
-        return (m.name || c.mosqueId) + ' (' + c.updatedBy + ')';
+        return (m.name || c.mosqueId) + ' (' + (c.updatedBy || 'مستخدم آخر') + ')';
       }).join('، ');
 
       el('dateNotice').innerHTML =
@@ -997,20 +1266,49 @@
         '<button class="btn btn-sm btn-plain" id="reloadBtn">تحديث — اعرض نسخته</button>' +
         '<button class="btn btn-sm btn-danger" id="forceBtn">اكتب فوقه</button></div></div>';
 
-      el('reloadBtn').onclick = function () { state.dirty = {}; load(state.date); };
+      el('reloadBtn').onclick = function () {
+        state.staleConflict = null;
+        state.dirty = {};
+        el('dateNotice').innerHTML = '';
+        setSaveStatus('idle');
+        load(state.date);
+      };
+
       el('forceBtn').onclick = async function () {
+        var btn = this;
+        btn.disabled = true;
+        btn.textContent = 'جاري الحفظ...';
+        setSaveStatus('saving');
         try {
           clearClientCache();
           var fresh = await api('getSchedule', { date: state.date });
-          var d = await api('saveSchedule', { date: state.date, version: fresh.version, changes: changes });
-          state.rows = d.rows; state.version = d.version; state.dirty = {};
-          state.conflictMosques = [];
+          state.version = fresh.version;
+          state.staleConflict = null;
           el('dateNotice').innerHTML = '';
+
+          var currentChanges = Object.keys(state.dirty).map(function (id) {
+            return { mosqueId: id, khatibId: state.dirty[id].khatibId, status: state.dirty[id].status };
+          });
+          var toSend = currentChanges.length ? currentChanges : changes;
+
+          var d = await api('saveSchedule', { date: state.date, version: state.version, changes: toSend });
+          state.rows = d.rows;
+          state.version = d.version;
+          state.dirty = {};
+          state.conflictMosques = [];
+          setSaveStatus('saved');
           toast('تم الحفظ فوق النسخة الأخرى', 'warn');
+
+          // رسم كامل: الرد فيه كمان تعديلات الشخص التاني في صفوف تانية
           render();
-        } catch (err) { toast(err.message, 'err'); }
+          refreshLoadCounts();
+        } catch (err) {
+          btn.disabled = false;
+          btn.textContent = 'اكتب فوقه';
+          setSaveStatus('error', err.message);
+          toast(err.message, 'err');
+        }
       };
-      render();
     }
 
     function highlight(mosqueIds) {
