@@ -9,7 +9,7 @@ import path from 'node:path';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const workerDir = path.resolve(__dirname, '..');
-const PORT = 8787;
+const PORT = Number(process.env.TEST_PORT) || 8787;
 const BASE_URL = `http://127.0.0.1:${PORT}`;
 
 let devProcess = null;
@@ -396,6 +396,76 @@ async function main() {
 
       const m1 = pubJson.data.rows.find(r => r.mosque === 'مسجد النور');
       assert(m1 && m1.khatib === 'محمد حسن', 'confirmed khatib must appear');
+    }),
+
+    test('Scenario O: reorderMosque renumbers 1..N and every listing follows the order', async () => {
+      const bad = await api({ action: 'reorderMosque', token, id: 'M003', position: 0 });
+      assert(!bad.ok && bad.error.code === 'BAD_REQUEST', 'position 0 must be BAD_REQUEST');
+
+      const missing = await api({ action: 'reorderMosque', token, id: 'M999', position: 1 });
+      assert(!missing.ok && missing.error.code === 'NOT_FOUND', 'unknown mosque must be NOT_FOUND');
+
+      const toEnd = await api({ action: 'reorderMosque', token, id: 'M001', position: 99 });
+      assert(toEnd.ok, `reorder must succeed: ${JSON.stringify(toEnd.error)}`);
+      const endIds = toEnd.data.mosques.map(m => m.id).join(',');
+      assert(endIds === 'M002,M003,M004,M001', `position past the end clamps to last, got ${endIds}`);
+
+      const res = await api({ action: 'reorderMosque', token, id: 'M003', position: 1 });
+      assert(res.ok, 'reorder must succeed');
+      const ids = res.data.mosques.map(m => m.id).join(',');
+      assert(ids === 'M003,M002,M004,M001', `M003 moves to 1 and pushes the rest, got ${ids}`);
+      assert(res.data.mosques.map(m => m.sortOrder).join(',') === '1,2,3,4', 'numbers stay contiguous');
+
+      const list = await api({ action: 'listMosques', token });
+      assert(list.data.mosques.map(m => m.id).join(',') === ids, 'listMosques follows sort order');
+
+      const sched = await api({ action: 'getSchedule', token, date: fridayDate });
+      assert(sched.data.rows.map(r => r.mosqueId).join(',') === ids, 'getSchedule follows sort order');
+      assert(sched.data.rows[0].sortOrder === 1, 'getSchedule rows carry sortOrder');
+    }),
+
+    test('Scenario P: getScheduleHistory returns earlier dates only', async () => {
+      const hist = await api({ action: 'getScheduleHistory', token, from: '2026-09-01', before: fridayDate });
+      assert(hist.ok, `history must succeed: ${JSON.stringify(hist.error)}`);
+      assert(hist.data.dates.map(d => d.date).join(',') === '2026-09-18', 'only the date before is returned');
+      const m1 = hist.data.rows.find(r => r.mosqueId === 'M001' && r.date === '2026-09-18');
+      assert(m1 && m1.khatibId === 'K005' && m1.status === 'excused', 'history row carries khatib and status');
+      assert(!hist.data.rows.some(r => r.date >= fridayDate), 'nothing on or after the current date');
+
+      const none = await api({ action: 'getScheduleHistory', token, from: fridayDate, before: fridayDate });
+      assert(none.ok && none.data.dates.length === 0, 'from >= before is empty, not an error');
+
+      const bad = await api({ action: 'getScheduleHistory', token, from: 'x', before: fridayDate });
+      assert(!bad.ok && bad.error.code === 'BAD_REQUEST', 'bad date is BAD_REQUEST');
+    }),
+
+    test('Scenario Q: publishing picked dates hides the dates in between; public rows are numbered in order', async () => {
+      for (const d of ['2026-10-02', '2026-10-09']) {
+        const g = await api({ action: 'generateDate', token, date: d, dateType: 'friday' });
+        assert(g.ok, 'generate ' + d);
+      }
+
+      const pub = await api({ action: 'publishRange', token, dates: ['2026-10-09', fridayDate, fridayDate] });
+      assert(pub.ok, `publish dates must succeed: ${JSON.stringify(pub.error)}`);
+      assert(pub.data.from === fridayDate && pub.data.to === '2026-10-09', 'from/to are first and last date');
+
+      const json = await (await fetch(`${BASE_URL}/`)).json();
+      assert(json.data.dates.map(d => d.date).join(',') === `${fridayDate},2026-10-09`, 'only picked dates are public');
+
+      const skipped = await (await fetch(`${BASE_URL}/?date=2026-10-02`)).json();
+      assert(skipped.data.date === fridayDate, 'an unpicked date inside the window is not served');
+
+      assert(json.data.rows[0].mosque === 'مسجد الإيمان' && json.data.rows[0].no === 1, 'public rows follow mosque order');
+      assert(json.data.rows.map(r => r.no).join(',') === '1,2,3,4', 'public numbers are 1..N');
+
+      const badDate = await api({ action: 'publishRange', token, dates: ['nope'] });
+      assert(!badDate.ok && badDate.error.code === 'BAD_REQUEST', 'bad date in list is rejected');
+
+      // النشر بالفترة (الطريقة القديمة) بيمسح قائمة التواريخ
+      const range = await api({ action: 'publishRange', token, from: fridayDate, to: fridayDate });
+      assert(range.ok, 'range publish still works');
+      const settings = await api({ action: 'getSettings', token });
+      assert(settings.data.settings.publish_dates === '', 'range publish clears picked dates');
     }),
 
     test('Scenario 7: deactivated mosque future rows removed and absent from public GET', async () => {

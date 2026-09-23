@@ -46,6 +46,13 @@ necessary but not sufficient; the script must re-assert the format on what it wr
 | E | `permanent_khatib_id` | text | no | `K071` |
 | F | `active` | `TRUE`/`FALSE` | yes | `TRUE` |
 | G | `created_at` | timestamp | yes | `2026-07-25T18:00:00Z` |
+| H | `sort_order` | integer | no | `1` |
+
+`sort_order` is the mosque's number and the order every screen lists mosques in — the
+schedule, the mosques screen, the publish preview and the public page. The API keeps it
+contiguous: active mosques are numbered `1..N`, inactive ones follow. Changing one mosque's
+number (`reorderMosque`) moves it to that position and shifts the rest. Added by migration
+`0003_mosque_order.sql`, which numbers existing mosques in their previous (id) order.
 
 `mujawra` is the neighbourhood. It is not always literally a *mujawra* — the real data also
 contains `الإسكان العائلي`, `120 فدان`, `المنطقة الصناعية`, `دار مصر`. Treat it as a free-text

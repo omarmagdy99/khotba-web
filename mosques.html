@@ -171,14 +171,8 @@
     }
 
     function renderList() {
+      // الترتيب جاي من السيرفر برقم المسجد — نفس ترتيب شاشة التوزيع والنشر
       var items = getFilteredMosques();
-
-      // Sort by mujawra then name
-      items.sort(function (a, b) {
-        var mjComp = (a.mujawra || '').localeCompare(b.mujawra || '', 'ar');
-        if (mjComp !== 0) return mjComp;
-        return (a.name || '').localeCompare(b.name || '', 'ar');
-      });
 
       el('totalCount').textContent = allMosques.length;
       el('visibleCount').textContent = items.length;
@@ -195,10 +189,12 @@
 
       var khatibMap = {};
       allKhatibs.forEach(function (k) { khatibMap[k.id] = k.name; });
+      var activeCount = allMosques.filter(function (m) { return isTrue(m.active); }).length;
 
-      var cols = canEdit() ? '2fr 1.2fr 2fr 1fr 1.5fr;' : '2fr 1.2fr 2fr 1fr;';
+      var cols = canEdit() ? '76px 2fr 1.2fr 2fr 1fr 1.5fr;' : '56px 2fr 1.2fr 2fr 1fr;';
       var html = '<div class="table-container">' +
         '<div class="table-header" style="grid-template-columns: ' + cols + '">' +
+          '<div title="رقم المسجد — غيّره عشان تغيّر الترتيب في كل الشاشات">#</div>' +
           '<div>اسم المسجد</div>' +
           '<div>المجاورة</div>' +
           '<div>الخطيب الثابت</div>' +
@@ -211,7 +207,13 @@
         var permId = m.permanent_khatib_id || m.permanentKhatibId || '';
         var permName = permId ? (khatibMap[permId] || permId) : '';
 
+        var noCell = (canEdit() && active)
+          ? '<input type="number" class="order-input" min="1" max="' + activeCount + '" value="' + esc(m.sortOrder || '') + '"' +
+            ' data-id="' + esc(m.id) + '" data-old="' + esc(m.sortOrder || '') + '" title="غيّر الرقم واضغط Enter">'
+          : '<span class="mosque-no">' + esc(active ? (m.sortOrder || '') : '—') + '</span>';
+
         html += '<div class="table-row" style="grid-template-columns: ' + cols + '">' +
+          '<div data-label="رقم المسجد">' + noCell + '</div>' +
           '<div data-label="اسم المسجد"><strong>' + esc(m.name) + '</strong></div>' +
           '<div data-label="المجاورة"><span class="area-badge">' + esc(m.mujawra) + '</span></div>' +
           '<div data-label="الخطيب الثابت">' + (permName ? esc(permName) : '<span class="muted">غير محدد</span>') + '</div>' +
@@ -230,6 +232,39 @@
       html += '</div>';
       resContainer.innerHTML = html;
     }
+
+    // ── تغيير رقم المسجد ─────────────────────────────────────
+
+    /**
+     * الرقم الجديد بيحط المسجد في المكان ده ويزق اللي بعده، والسيرفر بيرجّع
+     * الأرقام متصلة من 1. الترتيب ده هو اللي بيظهر في التوزيع والنشر.
+     */
+    el('results').addEventListener('change', async function (ev) {
+      var input = ev.target;
+      if (!input.classList || !input.classList.contains('order-input')) return;
+      var pos = parseInt(input.value, 10);
+      if (!pos || pos < 1 || String(pos) === input.dataset.old) {
+        input.value = input.dataset.old;
+        return;
+      }
+      input.disabled = true;
+      try {
+        var res = await api('reorderMosque', { id: input.dataset.id, position: pos });
+        allMosques = res.mosques || allMosques;
+        toast('تم تغيير الترتيب', 'ok');
+        renderList();
+      } catch (e) {
+        toast(e.message, 'err');
+        input.value = input.dataset.old;
+        input.disabled = false;
+      }
+    });
+
+    el('results').addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter' && ev.target.classList && ev.target.classList.contains('order-input')) {
+        ev.target.blur();
+      }
+    });
 
     // Search and Clear buttons
     el('searchInput').addEventListener('input', function () {

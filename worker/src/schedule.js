@@ -14,6 +14,7 @@ export async function getSchedule_(db, date) {
       a.mosque_id AS mosqueId,
       m.name AS mosque,
       m.mujawra,
+      m.sort_order AS sortOrder,
       a.khatib_id AS khatibId,
       k.name AS khatib,
       a.status,
@@ -25,7 +26,7 @@ export async function getSchedule_(db, date) {
     LEFT JOIN mosques m ON a.mosque_id = m.id
     LEFT JOIN khatibs k ON a.khatib_id = k.id
     WHERE a.date = ?
-    ORDER BY a.mosque_id ASC
+    ORDER BY m.sort_order IS NULL, m.sort_order ASC, a.mosque_id ASC
   `, date);
 
   let version = '';
@@ -35,6 +36,7 @@ export async function getSchedule_(db, date) {
       mosqueId: r.mosqueId,
       mosque: r.mosque || '?',
       mujawra: r.mujawra || '',
+      sortOrder: r.sortOrder || 0,
       khatibId: r.khatibId || '',
       khatib: r.khatib || '',
       status: r.status,
@@ -94,6 +96,46 @@ export async function getKhatibSchedule_(db, khatibId, from, to) {
     khatibId,
     count: formatted.length,
     rows: formatted
+  });
+}
+
+/**
+ * الخطب اللي قبل تاريخ معيّن — عشان المنسق يشوف مين خطب في المسجد قبل كده
+ * وهو بيوزّع. بيرجّع أحدث HISTORY_MAX_DATES تاريخ بس عشان الجدول ميتفرّطش.
+ */
+const HISTORY_MAX_DATES = 8;
+
+export async function getScheduleHistory_(db, from, before) {
+  if (!isIsoDate_(from) || !isIsoDate_(before)) return err_('BAD_REQUEST', 'تاريخ غير صحيح');
+  if (from >= before) return ok_({ dates: [], rows: [] });
+
+  const dateRows = await all(db, `
+    SELECT date, MAX(label) AS label
+    FROM assignments
+    WHERE date >= ? AND date < ?
+    GROUP BY date
+    ORDER BY date DESC
+    LIMIT ?
+  `, from, before, HISTORY_MAX_DATES);
+  if (!dateRows.length) return ok_({ dates: [], rows: [] });
+
+  const oldest = dateRows[dateRows.length - 1].date;
+  const rows = await all(db, `
+    SELECT a.date, a.mosque_id AS mosqueId, a.khatib_id AS khatibId, k.name AS khatib, a.status
+    FROM assignments a
+    LEFT JOIN khatibs k ON a.khatib_id = k.id
+    WHERE a.date >= ? AND a.date < ? AND a.khatib_id IS NOT NULL AND a.khatib_id != ''
+  `, oldest, before);
+
+  return ok_({
+    dates: dateRows.map(r => ({ date: r.date, label: r.label || '' })),
+    rows: rows.map(r => ({
+      date: r.date,
+      mosqueId: r.mosqueId,
+      khatibId: r.khatibId,
+      khatib: r.khatib || '',
+      status: r.status,
+    })),
   });
 }
 
@@ -423,15 +465,33 @@ export async function saveSchedule_(db, user, b) {
   return await getSchedule_(db, date);
 }
 
-export async function publishRange_(db, from, to) {
-  if (from && !isIsoDate_(from)) return err_('BAD_REQUEST', 'تاريخ البداية غير صحيح');
-  if (to && !isIsoDate_(to)) return err_('BAD_REQUEST', 'تاريخ النهاية غير صحيح');
-  if (from && to && from > to) return err_('BAD_REQUEST', 'تاريخ البداية بعد تاريخ النهاية');
+/**
+ * النشر بطريقتين: تواريخ بعينها (dates) من أزرار الجمع، أو فترة from..to.
+ * مع التواريخ بنحفظ from/to = أول وآخر تاريخ عشان أي حاجة بتقرا الفترة تفضل شغالة.
+ */
+export async function publishRange_(db, b) {
+  let from = b.from || '';
+  let to = b.to || '';
+  let dates = [];
 
-  await setSetting_(db, 'publish_from', from || '');
-  await setSetting_(db, 'publish_to', to || '');
+  if (Array.isArray(b.dates)) {
+    for (const d of b.dates) {
+      if (!isIsoDate_(d)) return err_('BAD_REQUEST', 'تاريخ غير صحيح: ' + d);
+    }
+    dates = [...new Set(b.dates)].sort();
+    from = dates[0] || '';
+    to = dates[dates.length - 1] || '';
+  } else {
+    if (from && !isIsoDate_(from)) return err_('BAD_REQUEST', 'تاريخ البداية غير صحيح');
+    if (to && !isIsoDate_(to)) return err_('BAD_REQUEST', 'تاريخ النهاية غير صحيح');
+    if (from && to && from > to) return err_('BAD_REQUEST', 'تاريخ البداية بعد تاريخ النهاية');
+  }
 
-  return ok_({ from: from || '', to: to || '' });
+  await setSetting_(db, 'publish_from', from);
+  await setSetting_(db, 'publish_to', to);
+  await setSetting_(db, 'publish_dates', dates.join(','));
+
+  return ok_({ from, to, dates });
 }
 
 export async function publicSchedule_(db, date) {
@@ -443,7 +503,10 @@ export async function publicSchedule_(db, date) {
     return ok_({ published: false, dates: [], rows: [] });
   }
 
-  const inWindow = await all(db, `
+  // لو النشر بتواريخ بعينها، اللي بين أول وآخر تاريخ ومش مختار مايظهرش
+  const picked = new Set(String(settings.publish_dates || '').split(',').filter(Boolean));
+
+  const inWindow = (await all(db, `
     SELECT 
       a.date,
       a.label,
@@ -455,8 +518,8 @@ export async function publicSchedule_(db, date) {
     JOIN mosques m ON a.mosque_id = m.id
     LEFT JOIN khatibs k ON a.khatib_id = k.id
     WHERE a.date >= ? AND a.date <= ? AND m.active = 1
-    ORDER BY a.date ASC, m.mujawra ASC, m.name ASC
-  `, from, to);
+    ORDER BY a.date ASC, m.sort_order IS NULL, m.sort_order ASC, a.mosque_id ASC
+  `, from, to)).filter(r => !picked.size || picked.has(r.date));
 
   const datesMap = {};
   for (const r of inWindow) {
@@ -470,19 +533,15 @@ export async function publicSchedule_(db, date) {
 
   const target = date && datesMap.hasOwnProperty(date) ? date : dateList[0].date;
 
+  // نفس ترتيب شاشة التوزيع، والرقم مسلسل من 1 عشان القائمة العامة متبقاش فيها فجوات
   const rows = inWindow
     .filter(r => r.date === target)
-    .map(r => ({
+    .map((r, i) => ({
+      no: i + 1,
       mosque: r.mosque,
       mujawra: r.mujawra,
       khatib: r.status === 'confirmed' ? (r.khatib || '') : ''
-    }))
-    .sort((x, y) => {
-      if (x.mujawra === y.mujawra) {
-        return x.mosque.localeCompare(y.mosque, 'ar');
-      }
-      return x.mujawra.localeCompare(y.mujawra, 'ar');
-    });
+    }));
 
   return ok_({
     published: true,

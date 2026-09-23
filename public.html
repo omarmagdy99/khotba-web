@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="assets/style.css">
   <script defer src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <style>
-    .table-header, .table-row { grid-template-columns: 2fr 1.2fr 2fr; }
+    .table-header, .table-row { grid-template-columns: 50px 2fr 1.2fr 2fr; }
   </style>
 </head>
 <body>
@@ -137,9 +137,10 @@
 
       box.innerHTML =
         '<div class="table-container">' +
-        '<div class="table-header"><div>🕌 المسجد</div><div>📍 المجاورة</div><div>🎙️ الخطيب</div></div>' +
-        rows.map(function (r) {
+        '<div class="table-header"><div>#</div><div>🕌 المسجد</div><div>📍 المجاورة</div><div>🎙️ الخطيب</div></div>' +
+        rows.map(function (r, i) {
           return '<div class="table-row">' +
+            '<div data-label="رقم المسجد"><span class="mosque-no">' + esc(r.no || i + 1) + '</span></div>' +
             '<div data-label="المسجد">' + esc(r.mosque) + '</div>' +
             '<div data-label="المجاورة"><span class="area-badge">' + esc(r.mujawra || '—') + '</span></div>' +
             '<div data-label="الخطيب">' + (r.khatib && String(r.khatib).trim()

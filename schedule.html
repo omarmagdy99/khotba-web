@@ -10,14 +10,15 @@
   <script defer src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/js/tom-select.complete.min.js"></script>
   <style>
-    .table-header, .table-row { grid-template-columns: 1.6fr 1fr 2.2fr 1fr; }
-    .friday-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
-    .chip {
-      padding: 8px 16px; border-radius: 50px; border: 2px solid var(--line);
-      background: #f8fafc; cursor: pointer; font-family: inherit; font-size: .85em; font-weight: 600;
-    }
-    .chip:hover { border-color: var(--blue); }
-    .chip.active { background: var(--navy); color: #fff; border-color: var(--navy); }
+    /* الأعمدة بتتغير حسب عدد الجُمع السابقة المعروضة، فبتيجي من متغير على الجدول */
+    .sched .table-header, .sched .table-row { grid-template-columns: var(--cols); }
+    .sched.no-hist .table-header, .sched.no-hist .table-row { grid-template-columns: var(--cols-base); }
+    .sched.no-hist .hist-cell { display: none; }
+    .hist-cell { font-size: .85em; color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+    .table-header .hist-cell { color: #cbd5e1; font-weight: 600; }
+    .hist-cell.hist-same { color: #b45309; font-weight: 700; }
+    .hist-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; font-size: .88em; color: var(--muted); }
+    .hist-bar input { width: auto; padding: 6px 10px; }
     .row-select { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; font-family: inherit; font-size: .9em; background: #fff; }
     .row-select:focus { border-color: var(--blue); outline: none; }
     .row-select.conflict { border-color: var(--err); background: #fef2f2; }
@@ -72,6 +73,14 @@
       </div>
     </div>
 
+    <div class="hist-bar">
+      <label for="histFrom" style="margin:0;font-weight:600">📜 عرض الخطب السابقة من</label>
+      <input type="date" id="histFrom">
+      <button type="button" class="btn btn-plain btn-sm" data-hist-weeks="2">آخر جمعتين</button>
+      <button type="button" class="btn btn-plain btn-sm" data-hist-weeks="3">آخر 3 جمع</button>
+      <button type="button" class="btn btn-plain btn-sm" id="histClear" style="display:none">إخفاء السابق</button>
+    </div>
+
     <div id="dateNotice"></div>
     <div id="main"></div>
   </div>
@@ -95,7 +104,13 @@
       filterEmpty: false,
       search: '',
       conflictMosques: [],
+      refPromise: null,  // تحميل المساجد والخطباء — الجدول مايترسمش قبله
+      histFrom: '',      // من أي تاريخ نعرض الخطب السابقة ('' = مخفية)
+      history: { dates: [], byMosque: {} }, // mosqueId -> date -> { khatibId, khatib, status }
     };
+
+    try { state.histFrom = sessionStorage.getItem('awqaf_hist_from') || ''; } catch (e) {}
+    el('histFrom').value = state.histFrom;
 
     (async function () {
       renderChips();
@@ -108,10 +123,11 @@
       var authPromise = requireAuth();
       if (!getToken()) { await authPromise; return; }
 
+      state.refPromise = loadReference();
       try {
         await Promise.all([
           authPromise,
-          loadReference(),
+          state.refPromise,
           load(f)
         ]);
       } catch (e) {
@@ -177,6 +193,21 @@
       m.mosques.forEach(function (x) { state.mosques[x.id] = x; });
     }
 
+    /**
+     * الجدول كان بيترسم أحيانًا قبل ما قائمة المساجد توصل (خصوصًا بعد الحفظ،
+     * لأن الحفظ بيمسح الكاش)، فالمجاورات كانت بتظهر "—" لحد الـ refresh.
+     * دلوقتي الرسم بيستنى المرجع، ولو فشل بنجرب تاني بدل ما نرسم ناقص.
+     */
+    async function ensureReference() {
+      if (!state.refPromise) state.refPromise = loadReference();
+      try {
+        await state.refPromise;
+      } catch (e) {
+        state.refPromise = loadReference();
+        await state.refPromise;
+      }
+    }
+
     async function load(date) {
       state.date = date;
       state.dirty = {};
@@ -189,8 +220,11 @@
       try {
         var results = await Promise.all([
           api('getSchedule', { date: date }),
-          refreshLoadCounts()
+          refreshLoadCounts(),
+          ensureReference(),
+          loadHistory(date)
         ]);
+        if (state.date !== date) return; // المستخدم اختار تاريخ تاني والطلب ده قديم
         var d = results[0];
         state.version = d.version;
         state.rows = d.rows;
@@ -214,6 +248,53 @@
         state.loadCount = res.counts || {};
       } catch (e) { state.loadCount = {}; }
     }
+
+    // ── الخطب السابقة ────────────────────────────────────────
+
+    /** الجُمع اللي قبل التاريخ الحالي من histFrom — الفشل فيها مايوقفش الشاشة. */
+    async function loadHistory(date) {
+      var empty = { dates: [], byMosque: {} };
+      if (!state.histFrom || state.histFrom >= date) { state.history = empty; return; }
+      try {
+        var res = await api('getScheduleHistory', { from: state.histFrom, before: date });
+        var byMosque = {};
+        (res.rows || []).forEach(function (h) {
+          var k = String(h.mosqueId);
+          (byMosque[k] = byMosque[k] || {})[h.date] = h;
+        });
+        state.history = { dates: res.dates || [], byMosque: byMosque };
+      } catch (e) {
+        state.history = empty;
+        toast('تعذّر تحميل الخطب السابقة: ' + e.message, 'warn');
+      }
+    }
+
+    function setHistFrom(v) {
+      state.histFrom = v || '';
+      el('histFrom').value = state.histFrom;
+      el('histClear').style.display = state.histFrom ? '' : 'none';
+      try {
+        if (state.histFrom) sessionStorage.setItem('awqaf_hist_from', state.histFrom);
+        else sessionStorage.removeItem('awqaf_hist_from');
+      } catch (e) {}
+      if (!state.date || !state.rows.length) return;
+      // إعادة رسم بس — التعديلات اللي لسه متحفظتش بتفضل زي ما هي
+      loadHistory(state.date).then(function () { if (state.rows.length) render(); });
+    }
+
+    el('histClear').style.display = state.histFrom ? '' : 'none';
+    el('histFrom').onchange = function () { setHistFrom(this.value); };
+    el('histClear').onclick = function () { setHistFrom(''); };
+    document.querySelectorAll('[data-hist-weeks]').forEach(function (b) {
+      b.onclick = function () {
+        var base = state.date || el('dateInput').value;
+        if (!base) return;
+        var p = base.split('-');
+        var d = new Date(Date.UTC(+p[0], +p[1] - 1, +p[2]));
+        d.setUTCDate(d.getUTCDate() - 7 * (+b.dataset.histWeeks));
+        setHistFrom(d.toISOString().slice(0, 10));
+      };
+    });
 
     // ── التوليد ──────────────────────────────────────────────
 
@@ -375,14 +456,26 @@
         noResultsEl.style.display = visibleCount === 0 ? 'block' : 'none';
       }
       if (tableHeader) {
-        tableHeader.style.display = visibleCount === 0 ? 'none' : 'grid';
+        tableHeader.style.display = visibleCount === 0 ? 'none' : ''; // '' عشان الموبايل يخفيه من الـ CSS
       }
     }
 
     function tableHtml(rows) {
-      return '<div class="table-container">' +
-        '<div class="table-header"><div>🕌 المسجد</div><div>📍 المجاورة</div><div>🎙️ الخطيب</div><div>الحالة</div></div>' +
+      var base = '46px 1.6fr 1fr 2.2fr 1fr';
+      var histCols = state.history.dates.map(function () { return ' 1.3fr'; }).join('');
+      var histHead = state.history.dates.map(function (d) {
+        return '<div class="hist-cell" title="' + esc(d.label || '') + '">' +
+          esc(formatDate(d.date)) + (d.label ? ' ✦' : '') + '</div>';
+      }).join('');
+      return '<div class="table-container sched" style="--cols:' + base + histCols + ';--cols-base:' + base + '">' +
+        '<div class="table-header"><div>#</div><div>🕌 المسجد</div><div>📍 المجاورة</div><div>🎙️ الخطيب</div><div>الحالة</div>' +
+        histHead + '</div>' +
         rows.map(rowHtml).join('') + '</div>';
+    }
+
+    function mosqueNo(r) {
+      var m = state.mosques[r.mosqueId] || {};
+      return r.sortOrder || m.sortOrder || '';
     }
 
     function rowHtml(r) {
@@ -390,11 +483,30 @@
       var e = effective(r);
       var cls = 'table-row' + (state.dirty[r.mosqueId] || state.dirty[String(r.mosqueId)] ? ' dirty' : '') + (!e.khatibId ? ' empty-slot' : '');
       return '<div class="' + cls + '" data-mosque="' + esc(r.mosqueId) + '">' +
+        '<div data-label="رقم المسجد"><span class="mosque-no">' + esc(mosqueNo(r)) + '</span></div>' +
         '<div data-label="المسجد">' + esc(m.name || r.mosque) + '</div>' +
-        '<div data-label="المجاورة"><span class="area-badge">' + esc(m.mujawra || '—') + '</span></div>' +
+        '<div data-label="المجاورة"><span class="area-badge">' + esc(m.mujawra || r.mujawra || '—') + '</span></div>' +
         '<div data-label="الخطيب">' + khatibButtonHtml(r, e) + '</div>' +
         '<div data-label="الحالة">' + statusHtml(r, e) + '</div>' +
+        histCellsHtml(r, e) +
         '</div>';
+    }
+
+    /** خانة لكل جمعة سابقة؛ لو نفس الخطيب المختار دلوقتي بتتلوّن عشان التكرار يبان. */
+    function histCellsHtml(r, e) {
+      var byDate = state.history.byMosque[String(r.mosqueId)] || {};
+      var cur = String(e.khatibId || '');
+      return state.history.dates.map(function (d) {
+        var h = byDate[d.date];
+        var label = formatDate(d.date);
+        if (!h) return '<div class="hist-cell" data-label="' + esc(label) + '"><span class="muted">—</span></div>';
+        var same = cur && String(h.khatibId) === cur;
+        var name = h.khatib || h.khatibId;
+        return '<div class="hist-cell' + (same ? ' hist-same' : '') + '" data-label="' + esc(label) + '"' +
+          ' title="' + esc(name + (same ? ' — نفس الخطيب المختار' : '')) + '">' +
+          esc(name) + (h.status === 'excused' ? ' <span class="badge badge-warn">معتذر</span>' : '') +
+          '</div>';
+      }).join('');
     }
 
     function khatibButtonHtml(r, e) {
@@ -446,6 +558,11 @@
       var statusCell = rowEl.querySelector('[data-label="الحالة"]');
       if (statusCell) {
         statusCell.innerHTML = statusHtml(r, e);
+      }
+
+      if (state.history.dates.length) {
+        rowEl.querySelectorAll('.hist-cell').forEach(function (c) { c.remove(); });
+        rowEl.insertAdjacentHTML('beforeend', histCellsHtml(r, e));
       }
     }
 
@@ -690,9 +807,16 @@
         };
       }
 
-      el('pdfBtn').onclick = function () {
+      el('pdfBtn').onclick = async function () {
         destroyActiveTomSelect();
-        exportPdf(el('pdfArea'), 'توزيع-' + state.date);
+        // الـ PDF للجمعة الحالية بس، من غير أعمدة الجُمع السابقة
+        var t = document.querySelector('#pdfArea .sched');
+        if (t) t.classList.add('no-hist');
+        try {
+          await exportPdf(el('pdfArea'), 'توزيع-' + state.date);
+        } finally {
+          if (t) t.classList.remove('no-hist');
+        }
       };
       var saveBtn = el('saveBtn');
       if (saveBtn) saveBtn.onclick = save;

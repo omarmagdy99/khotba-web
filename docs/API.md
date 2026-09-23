@@ -126,6 +126,7 @@ function doPost(e) {
 | `getKhatibSchedule` | `{ khatibId, from, to }` | one khatib's assignments in a range |
 | `listDates` | `{ from?, to? }` | every date that has assignment rows, with filled/empty counts |
 | `getLoadCounts` | `{ from?, to? }` | `{ counts: { khatibId: n } }` — sermons per khatib in the range |
+| `getScheduleHistory` | `{ from, before }` | `{ dates: [{ date, label }], rows: [{ date, mosqueId, khatibId, khatib, status }] }` — assigned rows on dates `from <= date < before`, newest 8 dates only |
 
 `getLoadCounts` exists so the scheduling screen can show each khatib's current load beside
 their name in one request. The obvious alternative — fetching each Friday and counting on the
@@ -145,6 +146,7 @@ The client sends it back on save. That is the whole concurrency story for the sc
 | `createMosque` | `{ name, mujawra, address?, permanentKhatibId? }` | `{ id }` |
 | `updateMosque` | `{ id, name, mujawra, address?, permanentKhatibId?, active? }` | `{ id }` |
 | `deactivateMosque` | `{ id }` | `{ clearedAssignments, clearedPermanentAt }` |
+| `reorderMosque` | `{ id, position }` | `{ mosques }` — moves an active mosque to number `position` (clamped to the last), renumbers `1..N` |
 | `createKhatib` | `{ name, phone?, type, notes? }` | `{ id, similarTo }` |
 | `updateKhatib` | `{ id, name, phone?, type, notes?, active? }` | `{ id }` |
 | `deactivateKhatib` | `{ id }` | `{ clearedAssignments, clearedPermanentAt }` |
@@ -274,10 +276,14 @@ Two caveats that are real:
 ### `publishRange`
 
 ```json
+{ "action": "publishRange", "dates": ["2026-07-31", "2026-08-14"] }
 { "action": "publishRange", "from": "2026-07-31", "to": "2026-08-28" }
 ```
 
-Writes `publish_from` / `publish_to` into `settings`. An empty `from` unpublishes everything.
+With `dates`, only those dates are public — a date between them that was not picked stays
+hidden. `publish_dates` holds the list, and `publish_from` / `publish_to` are set to the first
+and last date. With `from` / `to`, the whole range is public and `publish_dates` is cleared.
+An empty `from` (or empty `dates`) unpublishes everything.
 
 ## The public read
 
@@ -295,13 +301,16 @@ never an error, so the public page cannot be used to probe unpublished drafts.
   "ok": true,
   "data": {
     "date": "2026-07-31",
-    "rows": [ { "mosque": "النور المحمدي", "mujawra": "مجاورة 1", "khatib": "محمد أحمد فريد" } ]
+    "rows": [ { "no": 1, "mosque": "النور المحمدي", "mujawra": "مجاورة 1", "khatib": "محمد أحمد فريد" } ]
   }
 }
 ```
 
 With no `date` parameter it returns the full published range plus the list of available dates,
 so the public page can render a date picker.
+
+Rows come in mosque order (`sort_order`); `no` is their position, `1..N`, so the public list
+never shows a gap.
 
 Names, not ids — this response is for humans and must stay trivially renderable. Rows whose
 `khatib_id` is empty are returned with `khatib: ""`; the page shows `لم يُحدد بعد`. Hiding

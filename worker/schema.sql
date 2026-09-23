@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS mosques (
   permanent_khatib_id TEXT,
   active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
+  sort_order INTEGER, -- رقم المسجد وترتيبه في كل الشاشات
   CONSTRAINT uq_mosque_name_mujawra UNIQUE (name, mujawra)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_mosques_permanent ON mosques(permanent_khatib_id) WHERE permanent_khatib_id IS NOT NULL AND permanent_khatib_id != '';

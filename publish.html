@@ -18,13 +18,18 @@
     </div>
 
     <div class="form-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); background: #f8fafc; padding: 20px; border-radius: 18px; margin-bottom: 24px;">
+      <div class="field" style="margin:0;grid-column:1/-1">
+        <label>اختار الجُمع اللي هتظهر للناس</label>
+        <div class="friday-chips" id="publishChips" style="margin-bottom:0"></div>
+      </div>
+
       <div class="field" style="margin:0">
-        <label for="publishFrom">من تاريخ (جمعة)</label>
+        <label for="publishFrom">أو حدد فترة — من تاريخ</label>
         <input type="date" id="publishFrom">
       </div>
 
       <div class="field" style="margin:0">
-        <label for="publishTo">إلى تاريخ (جمعة)</label>
+        <label for="publishTo">إلى تاريخ</label>
         <input type="date" id="publishTo">
       </div>
 
@@ -55,6 +60,8 @@
     var currentTo = '';
     var activePreviewDate = '';
     var previewDatesList = [];
+    var selected = new Set();   // التواريخ اللي هتتنشر
+    var generated = {};         // date -> { label, total, filled } من listDates
 
     (async function () {
       if (!await requireAuth()) return;
@@ -69,19 +76,28 @@
     async function loadPublishSettings() {
       showLoading(el('previewContainer'), 'جاري تحميل بيانات النشر...');
       try {
-        var res = await api('getSettings');
-        var settings = res.settings || {};
+        var results = await Promise.all([api('getSettings'), api('listDates')]);
+        var settings = results[0].settings || {};
+
+        generated = {};
+        (results[1].dates || []).forEach(function (d) { generated[d.date] = d; });
 
         currentFrom = settings.publish_from || '';
         currentTo = settings.publish_to || '';
+        var picked = String(settings.publish_dates || '').split(',').filter(Boolean);
 
         var banner = el('statusBanner');
         if (currentFrom && currentTo) {
+          // النشر القديم كان فترة، والجديد تواريخ بعينها
+          selected = new Set(picked.length ? picked : datesInRange(currentFrom, currentTo));
+          var publishedText = picked.length
+            ? picked.map(formatDate).join('، ')
+            : 'من ' + formatDate(currentFrom) + ' إلى ' + formatDate(currentTo);
+
           var publicUrl = new URL('public.html', window.location.href).href;
           banner.className = 'notice notice-info';
           banner.innerHTML =
-            '<div>📌 <strong>المنشور حاليًا للجمهور:</strong> من ' +
-            esc(formatDate(currentFrom)) + ' إلى ' + esc(formatDate(currentTo)) + '</div>' +
+            '<div>📌 <strong>المنشور حاليًا للجمهور:</strong> ' + esc(publishedText) + '</div>' +
             '<div class="mt-2.5 p-2.5 bg-white rounded-3 border d-flex align-items-center justify-content-between gap-2 flex-wrap text-start" style="border-color:#bae6fd !important">' +
               '<div class="d-flex align-items-center gap-2 overflow-hidden" style="flex:1;min-width:200px">' +
                 '<span class="fs-6">🔗</span>' +
@@ -91,23 +107,86 @@
                 '📋 نسخ رابط النشر' +
               '</button>' +
             '</div>';
-
-          el('publishFrom').value = currentFrom;
-          el('publishTo').value = currentTo;
         } else {
           banner.className = 'notice notice-warn';
           banner.innerHTML = '⚠️ <strong>لم يتم نشر أي جدول حاليًا.</strong> الخدمة العامة متوقفة حتى تقوم بالنشر.';
-
-          var fridays = nextFridays(4);
-          el('publishFrom').value = fridays[0];
-          el('publishTo').value = fridays[3];
+          selected = new Set([nextFridays(1)[0]]);
         }
 
+        syncRangeInputs();
+        renderChips();
         await updatePreview();
       } catch (e) {
         showError(el('previewContainer'), e.message, loadPublishSettings);
       }
     }
+
+    /** كل الجُمع والتواريخ المتولّدة (زي المناسبات) اللي بين التاريخين. */
+    function datesInRange(from, to) {
+      var out = {};
+      var p = from.split('-');
+      var cur = new Date(Date.UTC(+p[0], +p[1] - 1, +p[2]));
+      var iso = from;
+      while (iso <= to) {
+        if (cur.getUTCDay() === 5) out[iso] = true;
+        cur.setUTCDate(cur.getUTCDate() + 1);
+        iso = cur.toISOString().slice(0, 10);
+      }
+      Object.keys(generated).forEach(function (d) { if (d >= from && d <= to) out[d] = true; });
+      return Object.keys(out).sort();
+    }
+
+    /** الأزرار: الجُمع الجاية + أي تاريخ متولّد جاي (مناسبات) + المختار حاليًا. */
+    function renderChips() {
+      var today = todayIso();
+      var set = {};
+      nextFridays(6).forEach(function (d) { set[d] = true; });
+      Object.keys(generated).forEach(function (d) { if (d >= today) set[d] = true; });
+      selected.forEach(function (d) { set[d] = true; });
+
+      var box = el('publishChips');
+      box.innerHTML = Object.keys(set).sort().map(function (d) {
+        var g = generated[d];
+        var on = selected.has(d);
+        var text = formatDate(d) + (g && g.label ? ' — ' + g.label : '');
+        var hint = g ? ('متوزع ' + (g.filled || 0) + ' من ' + g.total) : 'لسه متولّدتش في شاشة التوزيع';
+        return '<button type="button" class="chip' + (on ? ' active' : '') + '" data-date="' + d + '"' +
+          ' title="' + esc(hint) + '"' + (g ? '' : ' style="border-style:dashed"') + (canEdit() ? '' : ' disabled') + '>' +
+          (on ? '✓ ' : '') + esc(text) + '</button>';
+      }).join('');
+
+      box.querySelectorAll('.chip').forEach(function (c) {
+        c.onclick = function () {
+          var d = c.dataset.date;
+          if (selected.has(d)) selected.delete(d); else { selected.add(d); activePreviewDate = d; }
+          syncRangeInputs();
+          renderChips();
+          updatePreview();
+        };
+      });
+    }
+
+    function syncRangeInputs() {
+      var list = Array.from(selected).sort();
+      el('publishFrom').value = list[0] || '';
+      el('publishTo').value = list[list.length - 1] || '';
+    }
+
+    // الفترة بتختار كل الجُمع اللي فيها — وبعدها تقدر تشيل أو تزود بالأزرار
+    function onRangeChange() {
+      var from = el('publishFrom').value;
+      var to = el('publishTo').value;
+      if (!from || !to) return;
+      if (from > to) {
+        toast('تاريخ البداية يجب أن يكون قبل أو يساوي تاريخ النهاية', 'warn');
+        return;
+      }
+      selected = new Set(datesInRange(from, to));
+      renderChips();
+      updatePreview();
+    }
+    el('publishFrom').addEventListener('change', onRangeChange);
+    el('publishTo').addEventListener('change', onRangeChange);
 
     function copyPublicLink(url) {
       if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -131,42 +210,12 @@
       toast('تم نسخ رابط النشر بنجاح 📋', 'ok');
     }
 
-    el('publishFrom').addEventListener('change', updatePreview);
-    el('publishTo').addEventListener('change', updatePreview);
-
     async function updatePreview() {
-      var from = el('publishFrom').value;
-      var to = el('publishTo').value;
-
-      if (!from || !to) {
-        el('previewDateTabs').style.display = 'none';
-        showEmpty(el('previewContainer'), 'اختر تاريخ البداية والنهاية لمعاينة الجدول');
-        return;
-      }
-      if (from > to) {
-        el('previewDateTabs').style.display = 'none';
-        showEmpty(el('previewContainer'), 'تاريخ البداية يجب أن يكون قبل أو يساوي تاريخ النهاية');
-        return;
-      }
-
-      // Collect all Friday dates in range
-      previewDatesList = [];
-      var start = new Date(from);
-      var end = new Date(to);
-      var cur = new Date(Date.UTC(start.getFullYear(), start.getMonth(), start.getDate()));
-      var endUtc = Date.UTC(end.getFullYear(), end.getMonth(), end.getDate());
-
-      while (cur.getTime() <= endUtc) {
-        var iso = cur.toISOString().split('T')[0];
-        if (cur.getUTCDay() === 5) {
-          previewDatesList.push(iso);
-        }
-        cur.setUTCDate(cur.getUTCDate() + 1);
-      }
+      previewDatesList = Array.from(selected).sort();
 
       if (previewDatesList.length === 0) {
         el('previewDateTabs').style.display = 'none';
-        showEmpty(el('previewContainer'), 'لا توجد أيايم جمعة في الفترة المختارة');
+        showEmpty(el('previewContainer'), 'اختار جمعة واحدة على الأقل من الأزرار');
         return;
       }
 
@@ -209,40 +258,39 @@
 
       try {
         var res = await api('getSchedule', { date: dIso });
+        if (dIso !== activePreviewDate) return; // اتغيّر الاختيار والرد ده قديم
+        // نفس ترتيب شاشة التوزيع (رقم المسجد) — السيرفر بيرجّعها مترتبة
         var rows = res.rows || [];
-
-        // Sort by mujawra then mosque name
-        rows.sort(function (a, b) {
-          var mjComp = (a.mujawra || '').localeCompare(b.mujawra || '', 'ar');
-          if (mjComp !== 0) return mjComp;
-          return (a.mosque || '').localeCompare(b.mosque || '', 'ar');
-        });
 
         if (rows.length === 0) {
           showEmpty(previewBox, 'لم يتم توليد توزيع لهذه الجمعة بعد (' + formatDate(dIso) + ')');
           return;
         }
 
+        var cols = 'grid-template-columns: 50px 2fr 1.2fr 2fr;';
         var html = '<div style="background:#fff; padding:18px; border-radius:18px; border:1px solid var(--line);">' +
           '<div style="margin-bottom:14px; text-align:center;">' +
             '<h3 style="color:var(--navy); font-size:1.15em">جدول خطب الجمعة — ' + esc(formatDate(dIso)) + '</h3>' +
             '<p style="color:var(--muted); font-size:.85em">هذه المعاينة توضح تماماً الشكل الذي يظهر للجمهور عند زيارة الرابط العام</p>' +
           '</div>' +
           '<div class="table-container">' +
-            '<div class="table-header" style="grid-template-columns: 2fr 1.2fr 2fr;">' +
+            '<div class="table-header" style="' + cols + '">' +
+              '<div>#</div>' +
               '<div>🕌 المسجد</div>' +
               '<div>📍 المجاورة</div>' +
               '<div>🎙️ الخطيب</div>' +
             '</div>';
 
-        rows.forEach(function (r) {
-          var khatibText = r.khatib && r.khatib.trim()
+        rows.forEach(function (r, i) {
+          // للجمهور: المعتذر مايظهرش اسمه، زي الصفحة العامة بالظبط
+          var khatibText = r.status === 'confirmed' && r.khatib && r.khatib.trim()
             ? '<strong>' + esc(r.khatib) + '</strong>'
             : '<span class="muted">لم يُحدد بعد</span>';
 
-          html += '<div class="table-row" style="grid-template-columns: 2fr 1.2fr 2fr;">' +
+          html += '<div class="table-row" style="' + cols + '">' +
+            '<div data-label="رقم المسجد"><span class="mosque-no">' + (i + 1) + '</span></div>' +
             '<div data-label="المسجد"><strong>' + esc(r.mosque) + '</strong></div>' +
-            '<div data-label="المجاورة"><span class="area-badge">' + esc(r.mujawra) + '</span></div>' +
+            '<div data-label="المجاورة"><span class="area-badge">' + esc(r.mujawra || '—') + '</span></div>' +
             '<div data-label="الخطيب">' + khatibText + '</div>' +
           '</div>';
         });
@@ -256,24 +304,21 @@
 
     // Publish button action
     el('publishBtn').addEventListener('click', async function () {
-      var from = el('publishFrom').value;
-      var to = el('publishTo').value;
-
-      if (!from || !to) {
-        toast('يرجى تحديد تاريخ البداية والنهاية للنشر', 'err');
+      var dates = Array.from(selected).sort();
+      if (!dates.length) {
+        toast('اختار جمعة واحدة على الأقل للنشر', 'err');
         return;
       }
-      if (from > to) {
-        toast('تاريخ البداية يجب أن يكون قبل أو يساوي تاريخ النهاية', 'err');
-        return;
-      }
+      var notReady = dates.filter(function (d) { return !generated[d]; });
+      if (notReady.length && !confirmBox('الجُمع دي لسه متولّدتش في شاشة التوزيع ومش هتظهر للناس:\n' +
+          notReady.map(formatDate).join('، ') + '\n\nتكمل النشر؟')) return;
 
       var btn = el('publishBtn');
       btn.disabled = true;
       btn.textContent = 'جاري النشر...';
 
       try {
-        await api('publishRange', { from: from, to: to });
+        await api('publishRange', { dates: dates });
         toast('تم نشر الجدول للجمهور بنجاح 📢', 'ok');
         await loadPublishSettings();
       } catch (e) {

@@ -10,10 +10,10 @@
 import { ok_, err_, jsonResponse } from './util.js';
 import { login_, logout_, auth_, whoami_, changePassword_ } from './auth.js';
 import { listUsers_, createUser_, updateUser_, resetUserPassword_ } from './users.js';
-import { listMosques_, saveMosque_, deactivateMosque_ } from './mosques.js';
+import { listMosques_, saveMosque_, deactivateMosque_, reorderMosque_ } from './mosques.js';
 import { listKhatibs_, saveKhatib_, deactivateKhatib_, setPreferences_ } from './khatibs.js';
 import {
-  getSchedule_, getKhatibSchedule_, listDates_, getLoadCounts_,
+  getSchedule_, getKhatibSchedule_, getScheduleHistory_, listDates_, getLoadCounts_,
   generateDate_, regenerateDate_, saveSchedule_, publishRange_, publicSchedule_
 } from './schedule.js';
 import { getSettings_ } from './settings.js';
@@ -24,8 +24,8 @@ const SCRIPT_VERSION = '2026-07-26';
 const KNOWN_ACTIONS = [
   'login', 'logout', 'whoami', 'changePassword',
   'listMosques', 'listKhatibs', 'getSchedule', 'getKhatibSchedule', 'listDates',
-  'getLoadCounts', 'getSettings',
-  'createMosque', 'updateMosque', 'deactivateMosque',
+  'getLoadCounts', 'getSettings', 'getScheduleHistory',
+  'createMosque', 'updateMosque', 'deactivateMosque', 'reorderMosque',
   'createKhatib', 'updateKhatib', 'deactivateKhatib', 'setPreferences',
   'generateDate', 'regenerateDate', 'saveSchedule', 'publishRange',
   'listUsers', 'createUser', 'updateUser', 'resetUserPassword',
@@ -38,7 +38,9 @@ const ACTION_ROLE = {
   whoami: 'viewer', changePassword: 'viewer',
   listMosques: 'viewer', listKhatibs: 'viewer', getSchedule: 'viewer',
   getKhatibSchedule: 'viewer', listDates: 'viewer', getLoadCounts: 'viewer', getSettings: 'viewer',
+  getScheduleHistory: 'viewer',
   createMosque: 'coordinator', updateMosque: 'coordinator', deactivateMosque: 'coordinator',
+  reorderMosque: 'coordinator',
   createKhatib: 'coordinator', updateKhatib: 'coordinator', deactivateKhatib: 'coordinator',
   setPreferences: 'coordinator', generateDate: 'coordinator', regenerateDate: 'coordinator',
   saveSchedule: 'coordinator', publishRange: 'coordinator',
@@ -142,11 +144,13 @@ async function route_(b, env, request) {
     case 'listKhatibs':       return await listKhatibs_(env.DB, b.includeInactive);
     case 'getSchedule':       return await getSchedule_(env.DB, b.date);
     case 'getKhatibSchedule': return await getKhatibSchedule_(env.DB, b.khatibId, b.from, b.to);
+    case 'getScheduleHistory': return await getScheduleHistory_(env.DB, b.from, b.before);
     case 'listDates':         return await listDates_(env.DB);
     case 'getLoadCounts':     return await getLoadCounts_(env.DB, b.from, b.to);
     case 'createMosque':      return await saveMosque_(env.DB, user, b, true);
     case 'updateMosque':      return await saveMosque_(env.DB, user, b, false);
     case 'deactivateMosque':  return await deactivateMosque_(env.DB, user, b.id);
+    case 'reorderMosque':     return await reorderMosque_(env.DB, b);
     case 'createKhatib':      return await saveKhatib_(env.DB, user, b, true);
     case 'updateKhatib':      return await saveKhatib_(env.DB, user, b, false);
     case 'deactivateKhatib':  return await deactivateKhatib_(env.DB, user, b.id);
@@ -154,7 +158,7 @@ async function route_(b, env, request) {
     case 'generateDate':      return await generateDate_(env.DB, user, b);
     case 'regenerateDate':    return await regenerateDate_(env.DB, user, b);
     case 'saveSchedule':      return await saveSchedule_(env.DB, user, b);
-    case 'publishRange':      return await publishRange_(env.DB, b.from, b.to);
+    case 'publishRange':      return await publishRange_(env.DB, b);
     case 'getSettings':       return await getSettings_(env.DB);
     case 'listUsers':         return await listUsers_(env.DB);
     case 'createUser':        return await createUser_(env.DB, env, b);

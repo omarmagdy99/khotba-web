@@ -12,15 +12,56 @@ export function publicMosque_(m) {
     address: m.address || '',
     permanentKhatibId: m.permanent_khatib_id || '',
     active: isTrue_(m.active),
+    sortOrder: m.sort_order || 0,
   };
 }
 
+// ترتيب المساجد الموحّد في كل الشاشات (رقم المسجد)
+const MOSQUE_ORDER = 'sort_order IS NULL, sort_order ASC, id ASC';
+
 export async function listMosques_(db, includeInactive) {
   const sql = includeInactive
-    ? 'SELECT * FROM mosques ORDER BY id ASC'
-    : 'SELECT * FROM mosques WHERE active = 1 ORDER BY id ASC';
+    ? `SELECT * FROM mosques ORDER BY active DESC, ${MOSQUE_ORDER}`
+    : `SELECT * FROM mosques WHERE active = 1 ORDER BY ${MOSQUE_ORDER}`;
   const rows = await all(db, sql);
   return ok_({ mosques: rows.map(publicMosque_) });
+}
+
+/**
+ * بيخلّي أرقام المساجد متصلة 1..N: النشطين الأول بترتيبهم، وبعدهم غير النشطين.
+ * لو اتبعت moveId، المسجد ده بيتنقل للرقم position ويزق اللي بعده.
+ */
+export async function renumberMosques_(db, moveId, position) {
+  const list = await all(db, `SELECT id, active, sort_order FROM mosques ORDER BY active DESC, ${MOSQUE_ORDER}`);
+
+  if (moveId) {
+    const i = list.findIndex(m => m.id === moveId);
+    if (i >= 0) {
+      const [moved] = list.splice(i, 1);
+      const activeCount = list.filter(m => isTrue_(m.active)).length;
+      const pos = Math.min(Math.max(parseInt(position, 10) || 1, 1), activeCount + 1);
+      list.splice(pos - 1, 0, moved);
+    }
+  }
+
+  const stmts = [];
+  list.forEach((m, i) => {
+    if (m.sort_order !== i + 1) {
+      stmts.push(db.prepare('UPDATE mosques SET sort_order = ? WHERE id = ?').bind(i + 1, m.id));
+    }
+  });
+  await batch(db, stmts);
+}
+
+export async function reorderMosque_(db, b) {
+  const m = await one(db, 'SELECT id, active FROM mosques WHERE id = ?', b.id);
+  if (!m) return err_('NOT_FOUND', 'المسجد غير موجود');
+  if (!isTrue_(m.active)) return err_('BAD_REQUEST', 'فعّل المسجد الأول قبل ما تغيّر رقمه');
+  const pos = parseInt(b.position, 10);
+  if (!pos || pos < 1) return err_('BAD_REQUEST', 'رقم المسجد لازم يكون 1 أو أكبر');
+
+  await renumberMosques_(db, b.id, pos);
+  return await listMosques_(db, true);
 }
 
 export async function saveMosque_(db, user, b, isNew) {
@@ -65,6 +106,7 @@ export async function saveMosque_(db, user, b, isNew) {
       }
       throw err;
     }
+    await renumberMosques_(db);
     return ok_({ id });
   }
 
@@ -91,6 +133,8 @@ export async function saveMosque_(db, user, b, isNew) {
 
   if (isTrue_(existing.active) && !active) {
     await deactivateMosque_(db, user, b.id);
+  } else if (isTrue_(existing.active) !== !!active) {
+    await renumberMosques_(db);
   }
 
   return ok_({ id: b.id });
@@ -101,6 +145,7 @@ export async function deactivateMosque_(db, user, id) {
   if (!m) return err_('NOT_FOUND', 'غير موجود');
 
   await run(db, 'UPDATE mosques SET active = 0 WHERE id = ?', id);
+  await renumberMosques_(db);
 
   const today = todayIso_();
   const future = await all(db, 'SELECT * FROM assignments WHERE mosque_id = ? AND date >= ?', id, today);

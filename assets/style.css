@@ -146,6 +146,28 @@ h1 {
 .table-row.dirty { background: #fef9e7; }
 .table-row.empty-slot { background: #fef2f2; }
 
+/* رقم المسجد — نفس الرقم في كل الشاشات */
+.mosque-no {
+  display: inline-block; min-width: 30px; text-align: center;
+  background: #f1f5f9; color: var(--navy); font-weight: 700;
+  border-radius: 8px; padding: 2px 6px; font-size: .88em;
+}
+
+.order-input {
+  width: 62px; padding: 5px 6px; text-align: center; font-weight: 700;
+  border: 1px solid var(--line); border-radius: 8px; font-family: inherit; color: var(--navy);
+}
+.order-input:focus { border-color: var(--blue); outline: none; }
+
+/* أزرار تواريخ الجُمع */
+.friday-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.chip {
+  padding: 8px 16px; border-radius: 50px; border: 2px solid var(--line);
+  background: #f8fafc; cursor: pointer; font-family: inherit; font-size: .85em; font-weight: 600;
+}
+.chip:hover { border-color: var(--blue); }
+.chip.active { background: var(--navy); color: #fff; border-color: var(--navy); }
+
 .area-badge {
   background: #e0f2fe; color: #075985; padding: 3px 10px;
   border-radius: 50px; font-size: .85em; white-space: nowrap;
