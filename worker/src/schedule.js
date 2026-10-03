@@ -2,7 +2,7 @@
 
 import { all, one, run, batch } from './db.js';
 import { settingsMap_, setSetting_ } from './settings.js';
-import { ok_, err_, isIsoDate_, isFriday_, nowIso_, isTrue_ } from './util.js';
+import { ok_, err_, isIsoDate_, isFriday_, nowIso_, isTrue_, todayIso_ } from './util.js';
 
 export async function getSchedule_(db, date) {
   if (!isIsoDate_(date)) return err_('BAD_REQUEST', 'تاريخ غير صحيح');
@@ -468,8 +468,20 @@ export async function saveSchedule_(db, user, b) {
 /**
  * النشر بطريقتين: تواريخ بعينها (dates) من أزرار الجمع، أو فترة from..to.
  * مع التواريخ بنحفظ from/to = أول وآخر تاريخ عشان أي حاجة بتقرا الفترة تفضل شغالة.
+ * أو النشر التلقائي للجمعة القادمة عبر mode: 'auto'.
  */
 export async function publishRange_(db, b) {
+  if (b.mode === 'auto') {
+    await setSetting_(db, 'publish_mode', 'auto');
+    await setSetting_(db, 'publish_dates', '');
+    const hideEmptyVal = isTrue_(b.hideEmpty) ? '1' : '';
+    await setSetting_(db, 'publish_hide_empty', hideEmptyVal);
+    return ok_({ mode: 'auto', from: '', to: '', dates: [], hideEmpty: hideEmptyVal === '1' });
+  }
+
+  // أي نشر يدوي أو إلغاء نشر يعيد publish_mode إلى فارغ
+  await setSetting_(db, 'publish_mode', '');
+
   let from = b.from || '';
   let to = b.to || '';
   let dates = [];
@@ -495,11 +507,67 @@ export async function publishRange_(db, b) {
   const hideEmptyVal = (!isUnpublish && isTrue_(b.hideEmpty)) ? '1' : '';
   await setSetting_(db, 'publish_hide_empty', hideEmptyVal);
 
-  return ok_({ from, to, dates, hideEmpty: hideEmptyVal === '1' });
+  return ok_({ mode: '', from, to, dates, hideEmpty: hideEmptyVal === '1' });
 }
 
 export async function publicSchedule_(db, date) {
   const settings = await settingsMap_(db);
+
+  if (settings.publish_mode === 'auto') {
+    const today = todayIso_();
+    const nextRow = await one(db, `
+      SELECT date, MAX(label) AS label
+      FROM assignments
+      WHERE date >= ?
+      GROUP BY date
+      ORDER BY date ASC
+      LIMIT 1
+    `, today);
+
+    if (!nextRow) {
+      return ok_({ published: false, dates: [], rows: [] });
+    }
+
+    const target = nextRow.date;
+    const targetLabel = nextRow.label || '';
+
+    const targetRowsRaw = await all(db, `
+      SELECT 
+        a.date,
+        a.label,
+        a.status,
+        m.name AS mosque,
+        m.mujawra,
+        k.name AS khatib
+      FROM assignments a
+      JOIN mosques m ON a.mosque_id = m.id
+      LEFT JOIN khatibs k ON a.khatib_id = k.id
+      WHERE a.date = ? AND m.active = 1
+      ORDER BY m.sort_order IS NULL, m.sort_order ASC, a.mosque_id ASC
+    `, target);
+
+    const hideEmpty = settings.publish_hide_empty === '1';
+
+    let targetRows = targetRowsRaw;
+    if (hideEmpty) {
+      targetRows = targetRows.filter(r => r.status === 'confirmed' && r.khatib && r.khatib.trim());
+    }
+
+    const rows = targetRows.map((r, i) => ({
+      no: i + 1,
+      mosque: r.mosque,
+      mujawra: r.mujawra,
+      khatib: r.status === 'confirmed' ? (r.khatib || '') : ''
+    }));
+
+    return ok_({
+      published: true,
+      date: target,
+      dates: [{ date: target, label: targetLabel }],
+      rows
+    });
+  }
+
   const from = settings.publish_from;
   const to = settings.publish_to;
 

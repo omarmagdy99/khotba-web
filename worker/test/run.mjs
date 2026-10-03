@@ -153,8 +153,28 @@ async function main() {
   await waitForServer();
   console.log('Server is healthy!\n');
 
+function toIsoDate(d) {
+  return d.toISOString().slice(0, 10);
+}
+
+function addDays(isoDate, days) {
+  const d = new Date(isoDate + 'T00:00:00.000Z');
+  d.setUTCDate(d.getUTCDate() + days);
+  return toIsoDate(d);
+}
+
+function getNextFriday(now = new Date()) {
+  const day = now.getUTCDay();
+  const diff = (5 - day + 7) % 7 || 7;
+  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + diff));
+  return toIsoDate(d);
+}
+
   let token = '';
-  const fridayDate = '2026-09-25';
+  const fridayDate = getNextFriday();
+  const pastDate = addDays(fridayDate, -7);
+  const datePlus7 = addDays(fridayDate, 7);
+  const datePlus14 = addDays(fridayDate, 14);
 
   const scenarios = [
     test('Scenario H: health endpoint does not leak pepperConfigured', async () => {
@@ -343,7 +363,6 @@ async function main() {
     test('Scenario E: status-only change for a deactivated khatib past row is accepted', async () => {
       // K005 is inactive in fixture (active = 0).
       // Insert a past assignment for K005 on M001
-      const pastDate = '2026-09-18';
       d1Query(`INSERT OR REPLACE INTO assignments (id, date, mosque_id, khatib_id, status, date_type, label, updated_by, updated_at) VALUES ('${pastDate}_M001', '${pastDate}', 'M001', 'K005', 'confirmed', 'friday', '', 'testadmin', '${pastDate}T00:00:00.000Z')`);
 
       // 1. Changing only status for this existing row (with same khatib K005) must succeed
@@ -425,10 +444,10 @@ async function main() {
     }),
 
     test('Scenario P: getScheduleHistory returns earlier dates only', async () => {
-      const hist = await api({ action: 'getScheduleHistory', token, from: '2026-09-01', before: fridayDate });
+      const hist = await api({ action: 'getScheduleHistory', token, from: addDays(pastDate, -7), before: fridayDate });
       assert(hist.ok, `history must succeed: ${JSON.stringify(hist.error)}`);
-      assert(hist.data.dates.map(d => d.date).join(',') === '2026-09-18', 'only the date before is returned');
-      const m1 = hist.data.rows.find(r => r.mosqueId === 'M001' && r.date === '2026-09-18');
+      assert(hist.data.dates.map(d => d.date).join(',') === pastDate, 'only the date before is returned');
+      const m1 = hist.data.rows.find(r => r.mosqueId === 'M001' && r.date === pastDate);
       assert(m1 && m1.khatibId === 'K005' && m1.status === 'excused', 'history row carries khatib and status');
       assert(!hist.data.rows.some(r => r.date >= fridayDate), 'nothing on or after the current date');
 
@@ -440,19 +459,19 @@ async function main() {
     }),
 
     test('Scenario Q: publishing picked dates hides the dates in between; public rows are numbered in order', async () => {
-      for (const d of ['2026-10-02', '2026-10-09']) {
+      for (const d of [datePlus7, datePlus14]) {
         const g = await api({ action: 'generateDate', token, date: d, dateType: 'friday' });
         assert(g.ok, 'generate ' + d);
       }
 
-      const pub = await api({ action: 'publishRange', token, dates: ['2026-10-09', fridayDate, fridayDate] });
+      const pub = await api({ action: 'publishRange', token, dates: [datePlus14, fridayDate, fridayDate] });
       assert(pub.ok, `publish dates must succeed: ${JSON.stringify(pub.error)}`);
-      assert(pub.data.from === fridayDate && pub.data.to === '2026-10-09', 'from/to are first and last date');
+      assert(pub.data.from === fridayDate && pub.data.to === datePlus14, 'from/to are first and last date');
 
       const json = await (await fetch(`${BASE_URL}/`)).json();
-      assert(json.data.dates.map(d => d.date).join(',') === `${fridayDate},2026-10-09`, 'only picked dates are public');
+      assert(json.data.dates.map(d => d.date).join(',') === `${fridayDate},${datePlus14}`, 'only picked dates are public');
 
-      const skipped = await (await fetch(`${BASE_URL}/?date=2026-10-02`)).json();
+      const skipped = await (await fetch(`${BASE_URL}/?date=${datePlus7}`)).json();
       assert(skipped.data.date === fridayDate, 'an unpicked date inside the window is not served');
 
       assert(json.data.rows[0].mosque === 'مسجد الإيمان' && json.data.rows[0].no === 1, 'public rows follow mosque order');
@@ -495,6 +514,58 @@ async function main() {
       assert(resShow.data.rows.length === 4, 'all mosques are back');
       assert(resShow.data.rows.some(r => !r.khatib), 'unconfirmed/empty mosque is back');
       assert(resShow.data.rows.map(r => r.no).join(',') === '1,2,3,4', 'numbers stay 1..4 contiguous');
+    }),
+
+    test('Scenario S: automatic publishing mode (publish_mode=auto)', async () => {
+      // 1. Publish with mode: 'auto'
+      const pubAuto = await api({ action: 'publishRange', token, mode: 'auto' });
+      assert(pubAuto.ok, 'publishRange with mode: auto must succeed');
+      assert(pubAuto.data.mode === 'auto', 'response returns mode: auto');
+
+      const settingsAuto = await api({ action: 'getSettings', token });
+      assert(settingsAuto.data.settings.publish_mode === 'auto', 'publish_mode is stored as auto');
+      assert(settingsAuto.data.settings.publish_dates === '', 'publish_dates is cleared in auto mode');
+
+      // 2. Public GET returns exactly one date equal to earliest generated date >= today
+      const pubRes = await (await fetch(`${BASE_URL}/`)).json();
+      assert(pubRes.ok, 'public schedule GET succeeds in auto mode');
+      assert(pubRes.data.published === true, 'published must be true');
+      assert(pubRes.data.date === fridayDate, `date must be auto target (${fridayDate}), got ${pubRes.data.date}`);
+      assert(pubRes.data.dates.length === 1, 'dates must have exactly one date');
+      assert(pubRes.data.dates[0].date === fridayDate, 'dates[0].date must be auto target');
+      assert(pubRes.data.rows.length === 4, 'all active mosques present');
+
+      // 3. ?date= parameter is ignored in auto mode and still returns auto target
+      const pubWithDate = await (await fetch(`${BASE_URL}/?date=${datePlus14}`)).json();
+      assert(pubWithDate.ok, 'public GET with date param succeeds');
+      assert(pubWithDate.data.date === fridayDate, '?date param is ignored in auto mode, still returns auto target');
+      assert(pubWithDate.data.dates.length === 1 && pubWithDate.data.dates[0].date === fridayDate, 'dates array still contains only auto target');
+
+      // 4. hideEmpty applies in auto mode
+      const pubAutoHide = await api({ action: 'publishRange', token, mode: 'auto', hideEmpty: true });
+      assert(pubAutoHide.ok, 'publishRange auto with hideEmpty: true must succeed');
+
+      const resAutoHide = await (await fetch(`${BASE_URL}/`)).json();
+      assert(resAutoHide.ok, 'public GET succeeds with hideEmpty in auto mode');
+      assert(resAutoHide.data.rows.length < 4, 'unconfirmed/empty mosque is omitted in auto mode');
+      assert(!resAutoHide.data.rows.some(r => !r.khatib), 'no empty khatib rows in auto mode when hideEmpty is true');
+      const expectedNos = resAutoHide.data.rows.map((_, i) => i + 1).join(',');
+      assert(resAutoHide.data.rows.map(r => r.no).join(',') === expectedNos, 'numbers stay 1..N contiguous');
+
+      // 5. Later manual publish switches publish_mode back to ''
+      const pubManualDates = await api({ action: 'publishRange', token, dates: [fridayDate] });
+      assert(pubManualDates.ok, 'manual publish with dates must succeed');
+
+      const settingsManual = await api({ action: 'getSettings', token });
+      assert(settingsManual.data.settings.publish_mode === '', 'manual publish resets publish_mode to empty');
+
+      // 6. Reset state compatible with subsequent scenarios (range publish, hideEmpty false)
+      const pubReset = await api({ action: 'publishRange', token, from: fridayDate, to: fridayDate });
+      assert(pubReset.ok, 're-publish range for subsequent scenarios succeeds');
+
+      const finalSettings = await api({ action: 'getSettings', token });
+      assert(finalSettings.data.settings.publish_mode === '', 'final publish_mode is empty');
+      assert(finalSettings.data.settings.publish_hide_empty === '', 'final publish_hide_empty is empty');
     }),
 
     test('Scenario 7: deactivated mosque future rows removed and absent from public GET', async () => {

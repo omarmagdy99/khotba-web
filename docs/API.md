@@ -276,17 +276,21 @@ Two caveats that are real:
 ### `publishRange`
 
 ```json
+{ "action": "publishRange", "mode": "auto", "hideEmpty": false }
 { "action": "publishRange", "dates": ["2026-07-31", "2026-08-14"], "hideEmpty": true }
 { "action": "publishRange", "from": "2026-07-31", "to": "2026-08-28", "hideEmpty": false }
 ```
 
+With `mode: "auto"`, automatic publishing is enabled (`publish_mode` stored as `'auto'`, `publish_dates` cleared). The public page dynamically serves the upcoming sermon date without requiring weekly manual publishing.
+
 With `dates`, only those dates are public — a date between them that was not picked stays
 hidden. `publish_dates` holds the list, and `publish_from` / `publish_to` are set to the first
 and last date. With `from` / `to`, the whole range is public and `publish_dates` is cleared.
-An empty `from` (or empty `dates`) unpublishes everything.
+Any manual publish (by dates or from/to) resets `publish_mode` to `''`.
+An empty `from` (or empty `dates`, with mode not `auto`) unpublishes everything and resets `publish_mode` to `''`.
 
 Optional boolean `hideEmpty`: when true, stores `'1'` in `settings` under key `publish_hide_empty`
-(otherwise `''`). When unpublishing, `publish_hide_empty` is reset to `''`.
+(otherwise `''`). Works in both automatic and manual publishing modes. When unpublishing, `publish_hide_empty` is reset to `''`.
 
 ## The public read
 
@@ -296,7 +300,9 @@ Optional boolean `hideEmpty`: when true, stores `'1'` in `settings` under key `p
 GET {APPS_SCRIPT_URL}?date=2026-07-31
 ```
 
-Returns only dates inside the published window; anything outside it returns an empty list,
+In **auto mode** (`publish_mode === 'auto'`), the public endpoint computes the current date in Egypt timezone (`Africa/Cairo`) and finds the earliest generated date that has assignments with `date >= today` (so on Friday itself it shows that Friday, and from Saturday it advances to the next generated date). It returns `published: true` with `dates: [{ date, label }]` containing only that target date. The `?date=` query parameter is ignored in auto mode. If no generated date with `date >= today` exists, it returns `{ published: false, dates: [], rows: [] }`.
+
+In **manual mode**, it returns only dates inside the published window; anything outside it returns an empty list,
 never an error, so the public page cannot be used to probe unpublished drafts.
 
 ```json
@@ -309,7 +315,7 @@ never an error, so the public page cannot be used to probe unpublished drafts.
 }
 ```
 
-With no `date` parameter it returns the full published range plus the list of available dates,
+With no `date` parameter (in manual mode) it returns the full published range plus the list of available dates,
 so the public page can render a date picker.
 
 Rows come in mosque order (`sort_order`); `no` is their position, `1..N`, so the public list
@@ -321,7 +327,7 @@ them would make a mosque look absent from the directory.
 
 When `publish_hide_empty` setting is `'1'`, rows whose khatib is empty (status not confirmed
 or no khatib assigned) are dropped from the response, and `no` (1..N) is computed after
-that filter so numbers stay contiguous without gaps.
+that filter so numbers stay contiguous without gaps. This applies in both automatic and manual modes.
 
 ## Rate and quota reality
 

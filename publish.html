@@ -19,16 +19,33 @@
 
     <div class="form-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); background: #f8fafc; padding: 20px; border-radius: 18px; margin-bottom: 24px;">
       <div class="field" style="margin:0;grid-column:1/-1">
+        <label style="font-weight:700;margin-bottom:8px">طريقة النشر</label>
+        <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:center">
+          <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-weight:600">
+            <input type="radio" name="publishMode" value="auto" id="publishModeAuto" style="width:auto">
+            <span>نشر تلقائي للجمعة القادمة</span>
+          </label>
+          <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-weight:600">
+            <input type="radio" name="publishMode" value="manual" id="publishModeManual" style="width:auto" checked>
+            <span>اختيار يدوي للجُمع</span>
+          </label>
+        </div>
+        <div id="autoModeHint" style="font-size:0.85em;color:var(--muted);margin-top:6px;display:none">
+          الصفحة العامة هتعرض أقرب جمعة متولّدة تلقائيًا كل أسبوع — مفيش داعي تنشر كل مرة
+        </div>
+      </div>
+
+      <div class="field" id="fieldChips" style="margin:0;grid-column:1/-1;transition:opacity .2s">
         <label>اختار الجُمع اللي هتظهر للناس</label>
         <div class="friday-chips" id="publishChips" style="margin-bottom:0"></div>
       </div>
 
-      <div class="field" style="margin:0">
+      <div class="field" id="fieldFrom" style="margin:0;transition:opacity .2s">
         <label for="publishFrom">أو حدد فترة — من تاريخ</label>
         <input type="date" id="publishFrom">
       </div>
 
-      <div class="field" style="margin:0">
+      <div class="field" id="fieldTo" style="margin:0;transition:opacity .2s">
         <label for="publishTo">إلى تاريخ</label>
         <input type="date" id="publishTo">
       </div>
@@ -94,31 +111,60 @@
         generated = {};
         (results[1].dates || []).forEach(function (d) { generated[d.date] = d; });
 
+        var publishMode = settings.publish_mode || '';
+        if (el('publishModeAuto') && el('publishModeManual')) {
+          if (publishMode === 'auto') {
+            el('publishModeAuto').checked = true;
+            el('publishModeManual').checked = false;
+          } else {
+            el('publishModeAuto').checked = false;
+            el('publishModeManual').checked = true;
+          }
+        }
+
         currentFrom = settings.publish_from || '';
         currentTo = settings.publish_to || '';
         var picked = String(settings.publish_dates || '').split(',').filter(Boolean);
 
         var banner = el('statusBanner');
-        if (currentFrom && currentTo) {
+        var publicUrl = new URL('public.html', window.location.href).href;
+        var linkBoxHtml =
+          '<div class="mt-2.5 p-2.5 bg-white rounded-3 border d-flex align-items-center justify-content-between gap-2 flex-wrap text-start" style="border-color:#bae6fd !important">' +
+            '<div class="d-flex align-items-center gap-2 overflow-hidden" style="flex:1;min-width:200px">' +
+              '<span class="fs-6">🔗</span>' +
+              '<a href="' + esc(publicUrl) + '" target="_blank" class="text-decoration-underline text-break fw-bold small" style="color:var(--navy)">' + esc(publicUrl) + '</a>' +
+            '</div>' +
+            '<button type="button" class="btn btn-sm btn-ok shadow-sm px-3 rounded-pill" onclick="copyPublicLink(\'' + esc(publicUrl) + '\')">' +
+              '📋 نسخ رابط النشر' +
+            '</button>' +
+          '</div>';
+
+        if (publishMode === 'auto') {
+          var autoTarget = getAutoTargetDate();
+          if (autoTarget) {
+            var autoDateText = formatDate(autoTarget) + (generated[autoTarget] && generated[autoTarget].label ? ' — ' + generated[autoTarget].label : '');
+            banner.className = 'notice notice-info';
+            banner.innerHTML =
+              '<div>📌 <strong>النشر تلقائي — المعروض حاليًا:</strong> ' + esc(autoDateText) + '</div>' +
+              linkBoxHtml;
+          } else {
+            banner.className = 'notice notice-warn';
+            banner.innerHTML =
+              '<div>⚠️ <strong>النشر تلقائي — تحذير:</strong> لا توجد أي جمعة متولّدة قادمة في النظام.</div>' +
+              linkBoxHtml;
+          }
+          selected = new Set(nextFridays(1));
+        } else if (currentFrom && currentTo) {
           // النشر القديم كان فترة، والجديد تواريخ بعينها
           selected = new Set(picked.length ? picked : datesInRange(currentFrom, currentTo));
           var publishedText = picked.length
             ? picked.map(formatDate).join('، ')
             : 'من ' + formatDate(currentFrom) + ' إلى ' + formatDate(currentTo);
 
-          var publicUrl = new URL('public.html', window.location.href).href;
           banner.className = 'notice notice-info';
           banner.innerHTML =
             '<div>📌 <strong>المنشور حاليًا للجمهور:</strong> ' + esc(publishedText) + '</div>' +
-            '<div class="mt-2.5 p-2.5 bg-white rounded-3 border d-flex align-items-center justify-content-between gap-2 flex-wrap text-start" style="border-color:#bae6fd !important">' +
-              '<div class="d-flex align-items-center gap-2 overflow-hidden" style="flex:1;min-width:200px">' +
-                '<span class="fs-6">🔗</span>' +
-                '<a href="' + esc(publicUrl) + '" target="_blank" class="text-decoration-underline text-break fw-bold small" style="color:var(--navy)">' + esc(publicUrl) + '</a>' +
-              '</div>' +
-              '<button type="button" class="btn btn-sm btn-ok shadow-sm px-3 rounded-pill" onclick="copyPublicLink(\'' + esc(publicUrl) + '\')">' +
-                '📋 نسخ رابط النشر' +
-              '</button>' +
-            '</div>';
+            linkBoxHtml;
         } else {
           banner.className = 'notice notice-warn';
           banner.innerHTML = '⚠️ <strong>لم يتم نشر أي جدول حاليًا.</strong> الخدمة العامة متوقفة حتى تقوم بالنشر.';
@@ -127,10 +173,55 @@
 
         syncRangeInputs();
         renderChips();
+        updateModeUI();
         await updatePreview();
       } catch (e) {
         showError(el('previewContainer'), e.message, loadPublishSettings);
       }
+    }
+
+    function getAutoTargetDate() {
+      var today = todayIso();
+      var dates = Object.keys(generated).filter(function (d) {
+        return d >= today;
+      }).sort();
+      return dates.length ? dates[0] : null;
+    }
+
+    function updateModeUI() {
+      var isAuto = el('publishModeAuto') && el('publishModeAuto').checked;
+      if (el('autoModeHint')) {
+        el('autoModeHint').style.display = isAuto ? 'block' : 'none';
+      }
+      var fieldChips = el('fieldChips');
+      var fieldFrom = el('fieldFrom');
+      var fieldTo = el('fieldTo');
+      if (fieldChips) {
+        fieldChips.style.opacity = isAuto ? '0.4' : '1';
+        fieldChips.style.pointerEvents = isAuto ? 'none' : 'auto';
+      }
+      if (fieldFrom) {
+        fieldFrom.style.opacity = isAuto ? '0.4' : '1';
+        fieldFrom.style.pointerEvents = isAuto ? 'none' : 'auto';
+      }
+      if (fieldTo) {
+        fieldTo.style.opacity = isAuto ? '0.4' : '1';
+        fieldTo.style.pointerEvents = isAuto ? 'none' : 'auto';
+      }
+      if (el('publishFrom')) el('publishFrom').disabled = isAuto;
+      if (el('publishTo')) el('publishTo').disabled = isAuto;
+      var chips = el('publishChips') ? el('publishChips').querySelectorAll('button') : [];
+      for (var i = 0; i < chips.length; i++) {
+        chips[i].disabled = isAuto || !canEdit();
+      }
+    }
+
+    if (el('publishModeAuto')) el('publishModeAuto').addEventListener('change', onModeChange);
+    if (el('publishModeManual')) el('publishModeManual').addEventListener('change', onModeChange);
+
+    async function onModeChange() {
+      updateModeUI();
+      await updatePreview();
     }
 
     /** كل الجُمع والتواريخ المتولّدة (زي المناسبات) اللي بين التاريخين. */
@@ -156,6 +247,7 @@
       Object.keys(generated).forEach(function (d) { if (d >= today) set[d] = true; });
       selected.forEach(function (d) { set[d] = true; });
 
+      var isAuto = el('publishModeAuto') && el('publishModeAuto').checked;
       var box = el('publishChips');
       box.innerHTML = Object.keys(set).sort().map(function (d) {
         var g = generated[d];
@@ -163,12 +255,13 @@
         var text = formatDate(d) + (g && g.label ? ' — ' + g.label : '');
         var hint = g ? ('متوزع ' + (g.filled || 0) + ' من ' + g.total) : 'لسه متولّدتش في شاشة التوزيع';
         return '<button type="button" class="chip' + (on ? ' active' : '') + '" data-date="' + d + '"' +
-          ' title="' + esc(hint) + '"' + (g ? '' : ' style="border-style:dashed"') + (canEdit() ? '' : ' disabled') + '>' +
+          ' title="' + esc(hint) + '"' + (g ? '' : ' style="border-style:dashed"') + ((!canEdit() || isAuto) ? ' disabled' : '') + '>' +
           (on ? '✓ ' : '') + esc(text) + '</button>';
       }).join('');
 
       box.querySelectorAll('.chip').forEach(function (c) {
         c.onclick = function () {
+          if (el('publishModeAuto') && el('publishModeAuto').checked) return;
           var d = c.dataset.date;
           if (selected.has(d)) selected.delete(d); else { selected.add(d); activePreviewDate = d; }
           syncRangeInputs();
@@ -223,6 +316,20 @@
     }
 
     async function updatePreview() {
+      var isAuto = el('publishModeAuto') && el('publishModeAuto').checked;
+
+      if (isAuto) {
+        el('previewDateTabs').style.display = 'none';
+        var autoDate = getAutoTargetDate();
+        if (!autoDate) {
+          showEmpty(el('previewContainer'), 'لا توجد جمعة قادمة متولّدة لعرضها');
+          return;
+        }
+        activePreviewDate = autoDate;
+        await loadPreviewForDate(activePreviewDate);
+        return;
+      }
+
       previewDatesList = Array.from(selected).sort();
 
       if (previewDatesList.length === 0) {
@@ -373,20 +480,41 @@
 
     // Publish button action
     el('publishBtn').addEventListener('click', async function () {
-      var dates = Array.from(selected).sort();
-      if (!dates.length) {
-        toast('اختار جمعة واحدة على الأقل للنشر', 'err');
-        return;
-      }
-      var notReady = dates.filter(function (d) { return !generated[d]; });
-      if (notReady.length && !confirmBox('الجُمع دي لسه متولّدتش في شاشة التوزيع ومش هتظهر للناس:\n' +
-          notReady.map(formatDate).join('، ') + '\n\nتكمل النشر؟')) return;
+      var isAuto = el('publishModeAuto') && el('publishModeAuto').checked;
+      var hideEmpty = el('hideEmptyToggle') ? el('hideEmptyToggle').checked : false;
 
       var btn = el('publishBtn');
       btn.disabled = true;
       btn.textContent = 'جاري النشر...';
 
-      var hideEmpty = el('hideEmptyToggle') ? el('hideEmptyToggle').checked : false;
+      if (isAuto) {
+        try {
+          await api('publishRange', { mode: 'auto', hideEmpty: hideEmpty });
+          toast('تم تفعيل النشر التلقائي بنجاح 📢', 'ok');
+          await loadPublishSettings();
+        } catch (e) {
+          toast(e.message, 'err');
+        } finally {
+          btn.disabled = false;
+          btn.textContent = '📢 نشر الجدول';
+        }
+        return;
+      }
+
+      var dates = Array.from(selected).sort();
+      if (!dates.length) {
+        toast('اختار جمعة واحدة على الأقل للنشر', 'err');
+        btn.disabled = false;
+        btn.textContent = '📢 نشر الجدول';
+        return;
+      }
+      var notReady = dates.filter(function (d) { return !generated[d]; });
+      if (notReady.length && !confirmBox('الجُمع دي لسه متولّدتش في شاشة التوزيع ومش هتظهر للناس:\n' +
+          notReady.map(formatDate).join('، ') + '\n\nتكمل النشر؟')) {
+        btn.disabled = false;
+        btn.textContent = '📢 نشر الجدول';
+        return;
+      }
 
       try {
         await api('publishRange', { dates: dates, hideEmpty: hideEmpty });
