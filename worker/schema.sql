@@ -25,7 +25,9 @@ CREATE TABLE IF NOT EXISTS khatibs (
   type TEXT NOT NULL CHECK(type IN ('primary', 'volunteer')) DEFAULT 'primary',
   notes TEXT NOT NULL DEFAULT '',
   active INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  availability_mode TEXT NOT NULL DEFAULT 'all' CHECK(availability_mode IN ('all', 'custom')),
+  availability_weeks TEXT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_khatibs_phone ON khatibs(phone) WHERE phone IS NOT NULL AND phone != '';
 

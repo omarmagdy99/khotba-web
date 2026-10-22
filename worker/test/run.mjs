@@ -1228,6 +1228,101 @@ function getNextFriday(now = new Date()) {
       const addedRow = added.data.rows.find(r => r.khatibId === 'K002');
       assert(added.ok && addedRow && addedRow.status === 'unassigned', 'new mosque added during regeneration awaits confirmation');
     }),
+    test('Region-routed khatib availability CRUD isolation and rule preservation on omitted updates', async () => {
+      const tebCall = async (payload) => {
+        const response = await fetch(`${BASE_URL}/?region=tebeen`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token, ...payload }),
+        });
+        return response.json();
+      };
+
+      // 1. Create in May with custom availability [1, 3]
+      const mayCreate = await api({
+        action: 'createKhatib',
+        token,
+        name: 'خطيب 15 مايو المستقل',
+        phone: '01034567890',
+        type: 'primary',
+        availability: { mode: 'custom', weeks: [1, 3] },
+      });
+      assert(mayCreate.ok, `create May khatib with availability: ${JSON.stringify(mayCreate.error)}`);
+      const mayId = mayCreate.data.id;
+
+      // 2. Create in Tebeen with custom availability [2, 4, 5]
+      const tebCreate = await tebCall({
+        action: 'createKhatib',
+        name: 'خطيب التبين المستقل',
+        phone: '01098765432',
+        type: 'volunteer',
+        availability: { mode: 'custom', weeks: [2, 4, 5] },
+      });
+      assert(tebCreate.ok, `create Tebeen khatib with availability: ${JSON.stringify(tebCreate.error)}`);
+      const tebId = tebCreate.data.id;
+
+      // 3. Verify regional DB isolation
+      const mayList = await api({ action: 'listKhatibs', token, includeInactive: true });
+      const mayK = mayList.data.khatibs.find(k => k.id === mayId);
+      assert(mayK && mayK.availability.mode === 'custom' && JSON.stringify(mayK.availability.weeks) === '[1,3]', 'May khatib availability isolated in May DB');
+      assert(!mayList.data.khatibs.some(k => k.name === 'خطيب التبين المستقل'), 'Tebeen khatib does not appear in May list');
+
+      const tebList = await tebCall({ action: 'listKhatibs', includeInactive: true });
+      const tebK = tebList.data.khatibs.find(k => k.id === tebId);
+      assert(tebK && tebK.availability.mode === 'custom' && JSON.stringify(tebK.availability.weeks) === '[2,4,5]', 'Tebeen khatib availability isolated in Tebeen DB');
+      assert(!tebList.data.khatibs.some(k => k.name === 'خطيب 15 مايو المستقل'), 'May khatib does not appear in Tebeen list');
+
+      // 4. Update in May omitting availability preserves stored rule [1, 3]
+      const mayOmittedUpdate = await api({
+        action: 'updateKhatib',
+        token,
+        id: mayId,
+        name: 'خطيب 15 مايو المعدل',
+        phone: '01034567890',
+        type: 'primary',
+        notes: 'ملاحظة تحديث قديم',
+        active: true,
+      });
+      assert(mayOmittedUpdate.ok, 'May update omitting availability succeeds');
+      const mayAfterOmitted = await api({ action: 'listKhatibs', token, includeInactive: true });
+      const mayKAfter = mayAfterOmitted.data.khatibs.find(k => k.id === mayId);
+      assert(mayKAfter.name === 'خطيب 15 مايو المعدل', 'name updated in May');
+      assert(mayKAfter.notes === 'ملاحظة تحديث قديم', 'notes updated in May');
+      assert(mayKAfter.availability.mode === 'custom' && JSON.stringify(mayKAfter.availability.weeks) === '[1,3]', 'omitted availability preserves stored rule in May');
+
+      // 5. Update in Tebeen omitting availability preserves stored rule [2, 4, 5]
+      const tebOmittedUpdate = await tebCall({
+        action: 'updateKhatib',
+        id: tebId,
+        name: 'خطيب التبين المعدل',
+        phone: '01098765432',
+        type: 'volunteer',
+        notes: 'ملاحظة تبين قديمة',
+        active: true,
+      });
+      assert(tebOmittedUpdate.ok, 'Tebeen update omitting availability succeeds');
+      const tebAfterOmitted = await tebCall({ action: 'listKhatibs', includeInactive: true });
+      const tebKAfter = tebAfterOmitted.data.khatibs.find(k => k.id === tebId);
+      assert(tebKAfter.name === 'خطيب التبين المعدل', 'name updated in Tebeen');
+      assert(tebKAfter.notes === 'ملاحظة تبين قديمة', 'notes updated in Tebeen');
+      assert(tebKAfter.availability.mode === 'custom' && JSON.stringify(tebKAfter.availability.weeks) === '[2,4,5]', 'omitted availability preserves stored rule in Tebeen');
+
+      // 6. Rejected updates (null availability or malformed weeks) return BAD_REQUEST and preserve stored rule
+      const badNull = await api({ action: 'updateKhatib', token, id: mayId, name: 'تحديث لاغي', availability: null });
+      assert(badNull.error?.code === 'BAD_REQUEST', 'null availability rejected on update');
+      const badWeeks = await tebCall({ action: 'updateKhatib', id: tebId, name: 'تحديث لاغي', availability: { mode: 'custom', weeks: [0, 8] } });
+      assert(badWeeks.error?.code === 'BAD_REQUEST', 'malformed weeks rejected on update');
+
+      const mayCheck = (await api({ action: 'listKhatibs', token, includeInactive: true })).data.khatibs.find(k => k.id === mayId);
+      assert(mayCheck.availability.mode === 'custom' && JSON.stringify(mayCheck.availability.weeks) === '[1,3]', 'rejected update preserved May rule');
+
+      const tebCheck = (await tebCall({ action: 'listKhatibs', includeInactive: true })).data.khatibs.find(k => k.id === tebId);
+      assert(tebCheck.availability.mode === 'custom' && JSON.stringify(tebCheck.availability.weeks) === '[2,4,5]', 'rejected update preserved Tebeen rule');
+
+      // 7. Verify weekly schedule assignment statuses remain unchanged
+      const currentSched = await api({ action: 'getSchedule', token, date: fridayDate });
+      assert(currentSched.ok, 'weekly schedule remains readable and valid');
+    }),
   ];
 
   try {

@@ -21,6 +21,20 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, '../..');
 
+// Helper to obtain fresh schema (with availability columns)
+function getFreshSchema() {
+  return fs.readFileSync(path.join(rootDir, 'worker/schema.sql'), 'utf8');
+}
+
+// Helper to construct genuine legacy schema (removing availability columns)
+function getLegacySchema() {
+  const schema = fs.readFileSync(path.join(rootDir, 'worker/schema.sql'), 'utf8');
+  return schema.replace(
+    /,\r?\n\s*availability_mode\s+TEXT[^\r\n]*,\r?\n\s*availability_weeks\s+TEXT[^\r\n]*/,
+    ''
+  );
+}
+
 // Load browser helper via vm to verify exact browser/window compatibility
 function loadBrowserAvailability() {
   const browserCode = fs.readFileSync(path.join(rootDir, 'assets/availability.js'), 'utf8');
@@ -314,9 +328,9 @@ const mockUser = { username: 'admin', role: 'admin', region_access: 'both' };
 test('LEGACY PRESERVATION: Populating rows BEFORE migration0006 preserves all tables and columns', async () => {
   const sqlite = new DatabaseSync(':memory:');
 
-  // Step 1: Apply baseline schema ONLY (prior to migration 0006)
-  const baseSchema = fs.readFileSync(path.join(rootDir, 'worker/schema.sql'), 'utf8');
-  sqlite.exec(baseSchema);
+  // Step 1: Apply genuine legacy baseline schema (without availability_mode/availability_weeks)
+  const legacySchema = getLegacySchema();
+  sqlite.exec(legacySchema);
 
   // Step 2: Populate real legacy records in multiple tables BEFORE migration
   sqlite.exec(`
@@ -352,7 +366,7 @@ test('LEGACY PRESERVATION: Populating rows BEFORE migration0006 preserves all ta
   const preReadiness = sqlite.prepare('SELECT * FROM khatib_readiness ORDER BY date, khatib_id').all();
   const preUsers = sqlite.prepare('SELECT * FROM users ORDER BY username').all();
 
-  // Step 4: Apply migration 0006
+  // Step 4: Apply migration 0006 to legacy schema
   const migration0006 = fs.readFileSync(path.join(rootDir, 'worker/migrations/0006_khatib_availability.sql'), 'utf8');
   sqlite.exec(migration0006);
 
@@ -387,13 +401,30 @@ test('LEGACY PRESERVATION: Populating rows BEFORE migration0006 preserves all ta
 });
 
 // ════════════════════════════════════════════════════════════════════
-// 9. CRUD Validation, Rejection of Null, & Preservation on Rejected Updates
+// 9. Fresh Schema Contract & CRUD Verification
 // ════════════════════════════════════════════════════════════════════
 
-test('CRUD - Rejects explicit null on create and update', async () => {
+test('FRESH SCHEMA: schema.sql contains availability columns and operates directly without migration', async () => {
   const sqlite = new DatabaseSync(':memory:');
-  sqlite.exec(fs.readFileSync(path.join(rootDir, 'worker/schema.sql'), 'utf8'));
-  sqlite.exec(fs.readFileSync(path.join(rootDir, 'worker/migrations/0006_khatib_availability.sql'), 'utf8'));
+  sqlite.exec(getFreshSchema());
+  const db = makeD1Adapter(sqlite);
+
+  // Direct insert on fresh schema
+  const res = await saveKhatib_(db, mockUser, {
+    name: 'الشيخ في المخطط الحديث',
+    phone: '01066666666',
+    availability: { mode: 'custom', weeks: [1, 4] }
+  }, true);
+  assert.equal(res.ok, true);
+
+  const listRes = await listKhatibs_(db, true);
+  const k = listRes.data.khatibs.find(x => x.id === res.data.id);
+  assert.deepEqual(k.availability, { mode: 'custom', weeks: [1, 4] });
+});
+
+test('CRUD - Rejects explicit null on create and update on fresh schema', async () => {
+  const sqlite = new DatabaseSync(':memory:');
+  sqlite.exec(getFreshSchema());
   const db = makeD1Adapter(sqlite);
 
   // create with availability: null -> REJECTED
@@ -437,10 +468,9 @@ test('CRUD - Rejects explicit null on create and update', async () => {
   assert.deepEqual(k.availability, { mode: 'custom', weeks: [1, 3] });
 });
 
-test('CRUD - Rejects malformed weeks in all mode and preserves rule on rejection', async () => {
+test('CRUD - Rejects malformed weeks in all mode and preserves rule on rejection on fresh schema', async () => {
   const sqlite = new DatabaseSync(':memory:');
-  sqlite.exec(fs.readFileSync(path.join(rootDir, 'worker/schema.sql'), 'utf8'));
-  sqlite.exec(fs.readFileSync(path.join(rootDir, 'worker/migrations/0006_khatib_availability.sql'), 'utf8'));
+  sqlite.exec(getFreshSchema());
   const db = makeD1Adapter(sqlite);
 
   // Create khatib with custom rule [2, 4]
@@ -468,10 +498,9 @@ test('CRUD - Rejects malformed weeks in all mode and preserves rule on rejection
   assert.deepEqual(k.availability, { mode: 'custom', weeks: [2, 4] });
 });
 
-test('CRUD - Omitted availability preserves stored rule on old client updates', async () => {
+test('CRUD - Omitted availability preserves stored rule on old client updates on fresh schema', async () => {
   const sqlite = new DatabaseSync(':memory:');
-  sqlite.exec(fs.readFileSync(path.join(rootDir, 'worker/schema.sql'), 'utf8'));
-  sqlite.exec(fs.readFileSync(path.join(rootDir, 'worker/migrations/0006_khatib_availability.sql'), 'utf8'));
+  sqlite.exec(getFreshSchema());
   const db = makeD1Adapter(sqlite);
 
   const createRes = await saveKhatib_(db, mockUser, {
