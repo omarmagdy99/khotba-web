@@ -328,7 +328,14 @@
         var statusBadge = '';
         var boxClass = 'assignment-box';
 
-        if (a.status === 'confirmed') {
+        var hasPendingExcuse = a.excuseRequest && a.excuseRequest.status === 'pending';
+        var hasRejectedExcuse = a.excuseRequest && a.excuseRequest.status === 'rejected';
+        var hasAcceptedExcuse = a.excuseRequest && a.excuseRequest.status === 'accepted';
+
+        if (hasPendingExcuse) {
+          boxClass += ' confirmed';
+          statusBadge = '<span class="badge badge-warn" style="font-size:0.9em;background:#fef3c7;color:#92400e;border:1px solid #fcd34d">⏳ طلب الاعتذار قيد المراجعة</span>';
+        } else if (a.status === 'confirmed') {
           boxClass += ' confirmed';
           statusBadge = '<span class="badge badge-volunteer" style="font-size:0.9em">✅ مؤكد الحضور</span>';
         } else if (a.status === 'excused') {
@@ -364,16 +371,26 @@
               '<div class="detail-label">المناسبة</div>' +
               '<div class="detail-val">' + esc(a.label) + '</div>' +
             '</div>') : '') +
-          '</div>' +
+          '</div>';
 
+        var noticeHtml = '';
+        if (hasPendingExcuse) {
+          noticeHtml = '<div class="notice notice-warn" style="margin-top:14px">⏳ لقد تقدمت بطلب اعتذار بعد تأكيد الحضور، والطلب قيد مراجعة مسؤول التنسيق حالياً. يظل التكليف قائماً ومؤكداً لحين البت في الطلب.</div>';
+        } else if (hasRejectedExcuse && a.status === 'confirmed') {
+          noticeHtml = '<div class="notice notice-warn" style="margin-top:14px">ℹ️ تم رفض طلب الاعتذار السابق من قِبل إدارة الأوقاف؛ تكليفك بالخطبة مؤكد وقائم.</div>';
+        } else if (hasAcceptedExcuse && a.status === 'excused') {
+          noticeHtml = '<div class="notice notice-ok" style="margin-top:14px">✅ تمت الموافقة على طلب اعتذارك من قِبل إدارة الأوقاف.</div>';
+        }
+
+        html += noticeHtml +
           '<div style="font-weight:600;font-size:0.95em;color:var(--navy);margin-top:14px">يرجى تأكيد حضورك أو تسجيل اعتذارك:</div>' +
           '<div class="action-row">' +
             '<button type="button" class="btn btn-ok" onclick="respondAssignment(\'' + esc(data.date) + '\', \'confirmed\')" ' +
-              (a.status === 'confirmed' ? 'disabled' : '') + '>' +
+              (a.status === 'confirmed' || hasAcceptedExcuse ? 'disabled' : '') + '>' +
               '<span>✅</span> أؤكد حضوري للخطبة' +
             '</button>' +
-            '<button type="button" class="btn btn-danger" onclick="respondAssignment(\'' + esc(data.date) + '\', \'excused\')" ' +
-              (a.status === 'excused' ? 'disabled' : '') + '>' +
+            '<button type="button" class="btn btn-danger" onclick="respondAssignment(\'' + esc(data.date) + '\', \'excused\', ' + (a.status === 'confirmed') + ')" ' +
+              (a.status === 'excused' || hasPendingExcuse ? 'disabled' : '') + '>' +
               '<span>⚠️</span> أعتذر عن أداء الخطبة' +
             '</button>' +
           '</div>' +
@@ -420,9 +437,12 @@
     }
 
     // تأكيد أو اعتذار عن مسجد مكلف به
-    window.respondAssignment = async function (date, status) {
+    window.respondAssignment = async function (date, status, isConfirmed) {
       if (status === 'excused') {
-        if (!confirm('هل أنت متأكد من الاعتذار عن إلقاء الخطبة في هذه الجمعة؟ سيتم إخطار إدارة الأوقاف لتكليف خطيب بديل.')) {
+        var confirmMsg = isConfirmed
+          ? 'أنت مسجل كمؤكد الحضور. إرسال الاعتذار الآن سيُرسل كطلب مراجعة لمسؤول التنسيق، وسيظل تكليفك قائماً لحين مراجعة الطلب. هل تريد المتابعة؟'
+          : 'هل أنت متأكد من الاعتذار عن إلقاء الخطبة في هذه الجمعة؟ سيتم إخطار إدارة الأوقاف لتكليف خطيب بديل.';
+        if (!confirm(confirmMsg)) {
           return;
         }
       }

@@ -14,7 +14,8 @@ import { listMosques_, saveMosque_, deactivateMosque_, reorderMosque_ } from './
 import { listKhatibs_, saveKhatib_, deactivateKhatib_, setPreferences_ } from './khatibs.js';
 import {
   getSchedule_, getKhatibSchedule_, getScheduleHistory_, listDates_, getLoadCounts_,
-  generateDate_, regenerateDate_, saveSchedule_, publishRange_, publicSchedule_
+  generateDate_, regenerateDate_, saveSchedule_, publishRange_, publicSchedule_,
+  listExcuseRequests_, reviewExcuseRequest_
 } from './schedule.js';
 import { getSettings_ } from './settings.js';
 import { one } from './db.js';
@@ -32,6 +33,7 @@ const KNOWN_ACTIONS = [
   'generateDate', 'regenerateDate', 'saveSchedule', 'publishRange',
   'listUsers', 'createUser', 'updateUser', 'resetUserPassword',
   'khatibLogin', 'khatibWhoami', 'khatibGetSchedule', 'khatibRespond',
+  'listExcuseRequests', 'reviewExcuseRequest',
 ];
 
 // أقل صلاحية مطلوبة لكل إجراء. أي إجراء مش مذكور هنا بيتعامل على إنه للمدير بس،
@@ -47,6 +49,7 @@ const ACTION_ROLE = {
   createKhatib: 'coordinator', updateKhatib: 'coordinator', deactivateKhatib: 'coordinator',
   setPreferences: 'coordinator', generateDate: 'coordinator', regenerateDate: 'coordinator',
   saveSchedule: 'coordinator', publishRange: 'coordinator',
+  listExcuseRequests: 'coordinator', reviewExcuseRequest: 'coordinator',
   listUsers: 'admin', createUser: 'admin', updateUser: 'admin', resetUserPassword: 'admin',
 };
 
@@ -186,6 +189,8 @@ async function route_(b, env, request, db, region) {
     case 'regenerateDate':    return await regenerateDate_(db, user, b);
     case 'saveSchedule':      return await saveSchedule_(db, user, b);
     case 'publishRange':      return await publishRange_(db, b);
+    case 'listExcuseRequests': return await listExcuseRequests_(db, b);
+    case 'reviewExcuseRequest': return await reviewExcuseRequest_(db, user, b);
     case 'getSettings':       return await getSettings_(db);
     case 'listUsers':         return await listUsers_(env.DB);
     case 'createUser':        return await createUser_(env.DB, env, b);

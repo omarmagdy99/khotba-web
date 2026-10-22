@@ -8,7 +8,7 @@ export async function getSchedule_(db, date) {
   if (!isIsoDate_(date)) return err_('BAD_REQUEST', 'تاريخ غير صحيح');
 
   const rows = await all(db, `
-    SELECT 
+    SELECT
       a.id,
       a.date,
       a.mosque_id AS mosqueId,
@@ -53,12 +53,41 @@ export async function getSchedule_(db, date) {
     khatibReadiness[rr.khatib_id] = rr.status;
   }
 
+  const excuseRequests = await all(db, `
+    SELECT er.id, er.date, er.mosque_id AS mosqueId, er.khatib_id AS khatibId, er.assignment_version AS assignmentVersion,
+           er.status, er.notes, er.created_at AS createdAt, er.reviewed_by AS reviewedBy, er.reviewed_at AS reviewedAt,
+           k.name AS khatibName, m.name AS mosqueName
+    FROM excuse_requests er
+    JOIN khatibs k ON er.khatib_id = k.id
+    JOIN mosques m ON er.mosque_id = m.id
+    WHERE er.date = ?
+    ORDER BY er.created_at DESC
+  `, date);
+
+  const pendingByExactAssignment = new Map();
+  for (const er of excuseRequests) {
+    if (er.status === 'pending') {
+      const key = `${er.mosqueId}_${er.khatibId}_${er.assignmentVersion}`;
+      if (!pendingByExactAssignment.has(key)) {
+        pendingByExactAssignment.set(key, er);
+      }
+    }
+  }
+
+  for (const f of formatted) {
+    const key = `${f.mosqueId}_${f.khatibId}_${f.updatedAt}`;
+    const p = (f.status === 'confirmed' && f.khatibId) ? pendingByExactAssignment.get(key) : null;
+    f.hasPendingExcuse = !!p;
+    f.pendingExcuseRequestId = p ? p.id : null;
+  }
+
   return ok_({
     date,
     exists: formatted.length > 0,
     version,
     rows: formatted,
-    khatibReadiness
+    khatibReadiness,
+    excuseRequests: excuseRequests || []
   });
 }
 
@@ -66,7 +95,7 @@ export async function getKhatibSchedule_(db, khatibId, from, to) {
   if (!khatibId) return err_('BAD_REQUEST', 'khatibId مطلوب');
 
   let sql = `
-    SELECT 
+    SELECT
       a.date,
       a.mosque_id AS mosqueId,
       m.name AS mosque,
@@ -148,7 +177,7 @@ export async function getScheduleHistory_(db, from, before) {
 
 export async function listDates_(db) {
   const rows = await all(db, `
-    SELECT 
+    SELECT
       date,
       COUNT(*) AS total,
       SUM(CASE WHEN khatib_id IS NOT NULL AND khatib_id != '' THEN 1 ELSE 0 END) AS filled,
@@ -540,7 +569,7 @@ export async function publicSchedule_(db, date) {
     const targetLabel = nextRow.label || '';
 
     const targetRowsRaw = await all(db, `
-      SELECT 
+      SELECT
         a.date,
         a.label,
         a.status,
@@ -587,7 +616,7 @@ export async function publicSchedule_(db, date) {
   const picked = new Set(String(settings.publish_dates || '').split(',').filter(Boolean));
 
   const inWindow = (await all(db, `
-    SELECT 
+    SELECT
       a.date,
       a.label,
       a.status,
@@ -633,5 +662,169 @@ export async function publicSchedule_(db, date) {
     date: target,
     dates: dateList,
     rows
+  });
+}
+
+
+export async function listExcuseRequests_(db, b = {}) {
+  const date = b.date ? String(b.date).trim() : null;
+  const status = b.status ? String(b.status).trim() : null;
+
+  let sql = `
+    SELECT
+      er.id, er.date, er.mosque_id AS mosqueId, er.khatib_id AS khatibId,
+      er.assignment_version AS assignmentVersion,
+      er.status, er.notes, er.created_at AS createdAt,
+      er.reviewed_by AS reviewedBy, er.reviewed_at AS reviewedAt,
+      m.name AS mosqueName, m.mujawra,
+      k.name AS khatibName, k.phone AS khatibPhone,
+      a.status AS currentAssignmentStatus, a.khatib_id AS currentAssignmentKhatibId, a.updated_at AS currentAssignmentVersion
+    FROM excuse_requests er
+    JOIN mosques m ON er.mosque_id = m.id
+    JOIN khatibs k ON er.khatib_id = k.id
+    LEFT JOIN assignments a ON a.date = er.date AND a.mosque_id = er.mosque_id
+    WHERE 1=1
+  `;
+  const params = [];
+  if (date) {
+    sql += ' AND er.date = ?';
+    params.push(date);
+  }
+  if (status) {
+    sql += ' AND er.status = ?';
+    params.push(status);
+  }
+  sql += ' ORDER BY er.created_at DESC';
+
+  const rows = await all(db, sql, ...params);
+  return ok_({ requests: rows });
+}
+
+export async function reviewExcuseRequest_(db, user, b = {}) {
+  const requestId = String(b.requestId || '').trim();
+  const decision = String(b.decision || '').trim();
+
+  if (!requestId) {
+    return err_('BAD_REQUEST', 'معرف الطلب مطلوب');
+  }
+  if (!['accept', 'reject'].includes(decision)) {
+    return err_('BAD_REQUEST', 'القرار يجب أن يكون إما قبول أو رفض');
+  }
+
+  const req = await one(db, 'SELECT * FROM excuse_requests WHERE id = ?', requestId);
+  if (!req) {
+    return err_('NOT_FOUND', 'طلب الاعتذار غير موجود');
+  }
+
+  if (req.status !== 'pending') {
+    return err_('ALREADY_REVIEWED', 'تمت مراجعة هذا الطلب مسبقاً');
+  }
+
+  const now = nowIso_();
+
+  const assignId = `${req.date}_${req.mosque_id}`;
+
+  if (decision === 'reject') {
+    const updateRes = await run(db, `
+      UPDATE excuse_requests
+      SET status = 'rejected', reviewed_by = ?, reviewed_at = ?
+      WHERE id = ? AND status = 'pending'
+        AND EXISTS (
+          SELECT 1 FROM assignments
+          WHERE id = ? AND khatib_id = ? AND status = 'confirmed' AND updated_at = ?
+        )
+    `, user.username, now, requestId, assignId, req.khatib_id, req.assignment_version);
+
+    if (!updateRes?.meta?.changes) {
+      const freshReq = await one(db, 'SELECT status FROM excuse_requests WHERE id = ?', requestId);
+      if (!freshReq || freshReq.status !== 'pending') {
+        return err_('ALREADY_REVIEWED', 'تمت مراجعة هذا الطلب مسبقاً من قِبل مستخدم آخر');
+      }
+
+      const curAssign = await one(db, 'SELECT khatib_id, status, updated_at FROM assignments WHERE id = ?', assignId);
+      return err_('STALE_REQUEST', 'تعذر رفض الطلب: تم تغيير التكليف أو الخطيب المسند للمسجد مسبقاً.', {
+        currentKhatibId: curAssign ? curAssign.khatib_id : null,
+        currentStatus: curAssign ? curAssign.status : null,
+        targetVersion: req.assignment_version,
+        currentVersion: curAssign ? curAssign.updated_at : null
+      });
+    }
+
+    return ok_({
+      requestId,
+      decision: 'reject',
+      status: 'rejected',
+      assignmentModified: false,
+      date: req.date,
+      mosqueId: req.mosque_id,
+      khatibId: req.khatib_id
+    });
+  }
+
+  // decision === 'accept':
+  // Atomic CAS in a single batch:
+  // Both the request update and the assignment update are predicated on:
+  // 1. Request is still pending.
+  // 2. Target assignment still matches exactly (mosque, khatib, confirmed status, version).
+  const stmts = [
+    db.prepare(`
+      UPDATE excuse_requests
+      SET status = 'accepted', reviewed_by = ?, reviewed_at = ?
+      WHERE id = ? AND status = 'pending'
+        AND EXISTS (
+          SELECT 1 FROM assignments
+          WHERE id = ? AND khatib_id = ? AND status = 'confirmed' AND updated_at = ?
+        )
+    `).bind(user.username, now, requestId, assignId, req.khatib_id, req.assignment_version),
+
+    db.prepare(`
+      UPDATE assignments
+      SET status = 'excused', updated_by = ?, updated_at = ?
+      WHERE id = ? AND khatib_id = ? AND status = 'confirmed' AND updated_at = ?
+        AND EXISTS (
+          SELECT 1 FROM excuse_requests
+          WHERE id = ? AND status = 'accepted' AND reviewed_at = ?
+        )
+    `).bind(user.username, now, assignId, req.khatib_id, req.assignment_version, requestId, now),
+
+    db.prepare(`
+      INSERT INTO khatib_readiness (date, khatib_id, status, updated_at)
+      SELECT ?, ?, 'excused', ?
+      WHERE EXISTS (
+        SELECT 1 FROM excuse_requests
+        WHERE id = ? AND status = 'accepted' AND reviewed_at = ?
+      )
+      ON CONFLICT(date, khatib_id) DO UPDATE SET status = 'excused', updated_at = excluded.updated_at
+    `).bind(req.date, req.khatib_id, now, requestId, now)
+  ];
+
+  const results = await batch(db, stmts);
+
+  const reqUpdated = results[0]?.meta?.changes > 0;
+  const assignUpdated = results[1]?.meta?.changes > 0;
+
+  if (!reqUpdated || !assignUpdated) {
+    const freshReq = await one(db, 'SELECT status FROM excuse_requests WHERE id = ?', requestId);
+    if (!freshReq || freshReq.status !== 'pending') {
+      return err_('ALREADY_REVIEWED', 'تمت مراجعة هذا الطلب مسبقاً من قِبل مستخدم آخر');
+    }
+
+    const curAssign = await one(db, 'SELECT khatib_id, status, updated_at FROM assignments WHERE id = ?', assignId);
+    return err_('STALE_REQUEST', 'تعذر قبول الطلب: تم تغيير التكليف أو الخطيب المسند للمسجد مسبقاً.', {
+      currentKhatibId: curAssign ? curAssign.khatib_id : null,
+      currentStatus: curAssign ? curAssign.status : null,
+      targetVersion: req.assignment_version,
+      currentVersion: curAssign ? curAssign.updated_at : null
+    });
+  }
+
+  return ok_({
+    requestId,
+    decision: 'accept',
+    status: 'accepted',
+    assignmentModified: true,
+    date: req.date,
+    mosqueId: req.mosque_id,
+    khatibId: req.khatib_id
   });
 }

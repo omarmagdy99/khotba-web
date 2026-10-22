@@ -155,13 +155,33 @@ export async function khatibGetSchedule_(db, b) {
 
   // 1. فحص التكليف في هذا التاريخ
   const assignment = await one(db, `
-    SELECT 
-      a.id, a.date, a.status, a.date_type, a.label,
+    SELECT
+      a.id, a.date, a.status, a.date_type, a.label, a.updated_at,
       m.id AS mosque_id, m.name AS mosque_name, m.mujawra, m.address AS mosque_address, m.sort_order
     FROM assignments a
     JOIN mosques m ON a.mosque_id = m.id
     WHERE a.date = ? AND a.khatib_id = ?
   `, targetDate, khatib.id);
+
+  let excuseRequest = null;
+  if (assignment) {
+    const latestReq = await one(db, `
+      SELECT id, status, notes, created_at, reviewed_by, reviewed_at, assignment_version
+      FROM excuse_requests
+      WHERE date = ? AND mosque_id = ? AND khatib_id = ?
+      ORDER BY created_at DESC LIMIT 1
+    `, targetDate, assignment.mosque_id, khatib.id);
+
+    if (latestReq) {
+      if (latestReq.status === 'pending' && assignment.status === 'confirmed' && latestReq.assignment_version === assignment.updated_at) {
+        excuseRequest = latestReq;
+      } else if (latestReq.status === 'rejected' && assignment.status === 'confirmed' && latestReq.assignment_version === assignment.updated_at) {
+        excuseRequest = latestReq;
+      } else if (latestReq.status === 'accepted' && assignment.status === 'excused' && latestReq.reviewed_at >= assignment.updated_at) {
+        excuseRequest = latestReq;
+      }
+    }
+  }
 
   // 2. فحص الجاهزية المسجلة
   const readinessRow = await one(db,
@@ -185,7 +205,15 @@ export async function khatibGetSchedule_(db, b) {
       mujawra: assignment.mujawra,
       address: assignment.mosque_address,
       sortOrder: assignment.sort_order,
-      label: assignment.label
+      label: assignment.label,
+      excuseRequest: excuseRequest ? {
+        id: excuseRequest.id,
+        status: excuseRequest.status,
+        notes: excuseRequest.notes,
+        createdAt: excuseRequest.created_at,
+        reviewedBy: excuseRequest.reviewed_by,
+        reviewedAt: excuseRequest.reviewed_at
+      } : null
     } : null,
     readiness: readiness // ready, excused, undecided
   });
@@ -218,7 +246,7 @@ export async function khatibRespond_(db, b) {
     }
 
     const current = await one(db,
-      'SELECT id, mosque_id, status FROM assignments WHERE date = ? AND khatib_id = ?',
+      'SELECT id, mosque_id, status, updated_at FROM assignments WHERE date = ? AND khatib_id = ?',
       date, khatib.id
     );
 
@@ -226,41 +254,202 @@ export async function khatibRespond_(db, b) {
       return err_('NOT_FOUND', 'لم يتم العثور على تكليف مسجل لك في هذا التاريخ.');
     }
 
-    const updatedBy = 'الخطيب: ' + khatib.name;
-    const stmts = [
-      db.prepare('UPDATE assignments SET status = ?, updated_by = ?, updated_at = ? WHERE date = ? AND khatib_id = ?')
-        .bind(status, updatedBy, now, date, khatib.id)
-    ];
+    if (status === 'confirmed') {
+      // 1. تأكيد تكليف مؤكد بالفعل هو عملية خاملة ولا تغير رقم الإصدار، لكنها محكومة بشرط بقاء التكليف وإصداره الحاليين
+      if (current.status === 'confirmed') {
+        const readyRes = await run(db, `
+          INSERT INTO khatib_readiness (date, khatib_id, status, updated_at)
+          SELECT ?, ?, 'ready', ?
+          WHERE EXISTS (
+            SELECT 1 FROM assignments
+            WHERE id = ? AND khatib_id = ? AND status = 'confirmed' AND updated_at = ?
+          )
+          ON CONFLICT(date, khatib_id) DO UPDATE SET
+            status = excluded.status,
+            updated_at = excluded.updated_at
+          WHERE EXISTS (
+            SELECT 1 FROM assignments
+            WHERE id = ? AND khatib_id = ? AND status = 'confirmed' AND updated_at = ?
+          )
+        `, date, khatib.id, now,
+           current.id, khatib.id, current.updated_at,
+           current.id, khatib.id, current.updated_at);
 
-    // مزامنة حالة الجاهزية أيضاً
-    const syncReadiness = status === 'confirmed' ? 'ready' : 'excused';
-    stmts.push(
-      db.prepare(`
-        INSERT INTO khatib_readiness (date, khatib_id, status, updated_at)
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT(date, khatib_id) DO UPDATE SET status = excluded.status, updated_at = excluded.updated_at
-      `).bind(date, khatib.id, syncReadiness, now)
-    );
+        if (!readyRes?.meta?.changes) {
+          return err_('CONFLICT', 'تعذر تأكيد الحضور: تم تعديل حالة التكليف أو قبول اعتذار أثناء معالجة الطلب.');
+        }
 
-    await batch(db, stmts);
+        return ok_({
+          success: true,
+          type: 'assignment',
+          status: 'confirmed',
+          message: 'تم تأكيد حضورك بنجاح. جزاكم الله خيراً.'
+        });
+      }
 
-    return ok_({
-      success: true,
-      type: 'assignment',
-      status: status,
-      message: status === 'confirmed' ? 'تم تأكيد حضورك بنجاح. جزاكم الله خيراً.' : 'تم تسجيل اعتذارك عن الخطبة وسينعكس ذلك على جدول التنسيق.'
-    });
+      // 2. إذا كانت الحالة معتذراً ومقبولاً من الإدارة، يمنع إعادة التأكيد ذاتياً
+      if (current.status === 'excused') {
+        const acceptedReq = await one(db,
+          'SELECT id FROM excuse_requests WHERE date = ? AND mosque_id = ? AND khatib_id = ? AND status = "accepted" AND reviewed_at >= ?',
+          date, current.mosque_id, khatib.id, current.updated_at || ''
+        );
+        if (acceptedReq) {
+          return err_('FORBIDDEN', 'تم قبول اعتذارك السابق من قِبل إدارة الأوقاف؛ لا يمكن إعادة التأكيد ذاتياً ويجب مراجعة المنسق.');
+        }
+      }
+
+      // 3. تأكيد التكليف مع حماية ذرية (CAS) تشترط مطابقة الهوية والحالة والإصدار بدقة
+      const updatedBy = 'الخطيب: ' + khatib.name;
+      const stmts = [
+        db.prepare(`
+          UPDATE assignments
+          SET status = 'confirmed', updated_by = ?, updated_at = ?
+          WHERE id = ? AND khatib_id = ? AND status = ? AND updated_at = ?
+        `).bind(updatedBy, now, current.id, khatib.id, current.status, current.updated_at),
+        db.prepare(`
+          INSERT INTO khatib_readiness (date, khatib_id, status, updated_at)
+          SELECT ?, ?, 'ready', ?
+          WHERE EXISTS (
+            SELECT 1 FROM assignments
+            WHERE id = ? AND khatib_id = ? AND status = 'confirmed' AND updated_at = ?
+          )
+          ON CONFLICT(date, khatib_id) DO UPDATE SET status = excluded.status, updated_at = excluded.updated_at
+        `).bind(date, khatib.id, now, current.id, khatib.id, now)
+      ];
+      const results = await batch(db, stmts);
+      if (!results[0]?.meta?.changes) {
+        return err_('CONFLICT', 'تعذر تأكيد الحضور: تم تعديل حالة التكليف أو إعادة إسناده أثناء معالجة الطلب.');
+      }
+
+      return ok_({
+        success: true,
+        type: 'assignment',
+        status: 'confirmed',
+        message: 'تم تأكيد حضورك بنجاح. جزاكم الله خيراً.'
+      });
+    }
+
+    if (status === 'excused') {
+      if (current.status === 'confirmed') {
+        const reqId = 'req_' + randomHex(12);
+        const notes = String(b.notes || '').trim();
+
+        // إدراج ذري يشترط مطابقة التكليف المؤكد وإصداره بدقة
+        const insertRes = await run(db, `
+          INSERT INTO excuse_requests (id, date, mosque_id, khatib_id, assignment_version, status, notes, created_at)
+          SELECT ?, ?, ?, ?, ?, 'pending', ?, ?
+          WHERE EXISTS (
+            SELECT 1 FROM assignments
+            WHERE id = ? AND khatib_id = ? AND status = 'confirmed' AND updated_at = ?
+          )
+          ON CONFLICT(date, mosque_id, khatib_id) WHERE status = 'pending'
+          DO UPDATE SET
+            assignment_version = excluded.assignment_version,
+            notes = CASE WHEN excluded.notes != '' THEN excluded.notes ELSE excuse_requests.notes END,
+            created_at = excluded.created_at
+          WHERE EXISTS (
+            SELECT 1 FROM assignments
+            WHERE id = ? AND khatib_id = ? AND status = 'confirmed' AND updated_at = excluded.assignment_version
+          )
+        `, reqId, date, current.mosque_id, khatib.id, current.updated_at || '', notes, now,
+           current.id, khatib.id, current.updated_at || '',
+           current.id, khatib.id);
+
+        if (!insertRes?.meta?.changes) {
+          return err_('CONFLICT', 'تعذر تقديم طلب الاعتذار: تم تعديل حالة التكليف أو إلغاؤه أثناء معالجة الطلب.');
+        }
+
+        const pendingReq = await one(db,
+          'SELECT id, status, created_at, assignment_version FROM excuse_requests WHERE date = ? AND mosque_id = ? AND khatib_id = ? AND status = "pending"',
+          date, current.mosque_id, khatib.id
+        );
+
+        return ok_({
+          success: true,
+          type: 'assignment',
+          status: 'confirmed',
+          pendingReview: true,
+          requestId: pendingReq ? pendingReq.id : reqId,
+          message: 'تم إرسال طلب الاعتذار إلى مسؤول التنسيق وهو قيد المراجعة حالياً. يظل التكليف قائماً لحين البت في الطلب.'
+        });
+      }
+
+      // اعتذار أولي (قبل التأكيد): محمي ذرياً بـ CAS لمنع الالتفاف إذا تم التأكيد بالتزامن
+      const updatedBy = 'الخطيب: ' + khatib.name;
+      const stmts = [
+        db.prepare(`
+          UPDATE assignments
+          SET status = 'excused', updated_by = ?, updated_at = ?
+          WHERE id = ? AND khatib_id = ? AND status = ? AND updated_at = ?
+        `).bind(updatedBy, now, current.id, khatib.id, current.status, current.updated_at),
+        db.prepare(`
+          INSERT INTO khatib_readiness (date, khatib_id, status, updated_at)
+          SELECT ?, ?, 'excused', ?
+          WHERE EXISTS (
+            SELECT 1 FROM assignments
+            WHERE id = ? AND khatib_id = ? AND status = 'excused' AND updated_at = ?
+          )
+          ON CONFLICT(date, khatib_id) DO UPDATE SET status = excluded.status, updated_at = excluded.updated_at
+        `).bind(date, khatib.id, now, current.id, khatib.id, now)
+      ];
+      const results = await batch(db, stmts);
+      if (!results[0]?.meta?.changes) {
+        return err_('CONFLICT', 'تعذر تسجيل الاعتذار: تم تعديل حالة التكليف أو تأكيده أثناء معالجة الطلب.');
+      }
+
+      return ok_({
+        success: true,
+        type: 'assignment',
+        status: 'excused',
+        message: 'تم تسجيل اعتذارك عن الخطبة وسينعكس ذلك على جدول التنسيق.'
+      });
+    }
 
   } else if (responseType === 'readiness') {
     if (!['ready', 'excused'].includes(status)) {
       return err_('BAD_REQUEST', 'الحالة غير صحيحة (مستعد أو معتذر فقط)');
     }
 
-    await run(db, `
+    const res = await run(db, `
       INSERT INTO khatib_readiness (date, khatib_id, status, updated_at)
-      VALUES (?, ?, ?, ?)
-      ON CONFLICT(date, khatib_id) DO UPDATE SET status = excluded.status, updated_at = excluded.updated_at
-    `, date, khatib.id, status, now);
+      SELECT ?, ?, ?, ?
+      WHERE NOT EXISTS (
+        SELECT 1 FROM assignments
+        WHERE date = ? AND khatib_id = ? AND status = 'confirmed' AND ? = 'excused'
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM assignments a
+        JOIN excuse_requests er ON er.date = a.date AND er.mosque_id = a.mosque_id AND er.khatib_id = a.khatib_id
+        WHERE a.date = ? AND a.khatib_id = ? AND a.status = 'excused' AND er.status = 'accepted' AND er.reviewed_at >= a.updated_at
+        AND ? = 'ready'
+      )
+      ON CONFLICT(date, khatib_id) DO UPDATE SET
+        status = excluded.status,
+        updated_at = excluded.updated_at
+      WHERE NOT EXISTS (
+        SELECT 1 FROM assignments
+        WHERE date = excluded.date AND khatib_id = excluded.khatib_id AND status = 'confirmed' AND excluded.status = 'excused'
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM assignments a
+        JOIN excuse_requests er ON er.date = a.date AND er.mosque_id = a.mosque_id AND er.khatib_id = a.khatib_id
+        WHERE a.date = excluded.date AND a.khatib_id = excluded.khatib_id AND a.status = 'excused' AND er.status = 'accepted' AND er.reviewed_at >= a.updated_at
+        AND excluded.status = 'ready'
+      )
+    `, date, khatib.id, status, now,
+       date, khatib.id, status,
+       date, khatib.id, status);
+
+    if (!res?.meta?.changes) {
+      const activeConfirmed = await one(db,
+        "SELECT 1 FROM assignments WHERE date = ? AND khatib_id = ? AND status = 'confirmed'",
+        date, khatib.id
+      );
+      if (activeConfirmed && status === 'excused') {
+        return err_('BAD_REQUEST', 'لديك تكليف مؤكد بمسجد في هذه الجمعة؛ لا يمكن تسجيل الاعتذار عبر الجاهزية ويجب تقديم طلب اعتذار عن التكليف.');
+      }
+      return err_('FORBIDDEN', 'تم قبول اعتذارك السابق من قِبل إدارة الأوقاف؛ لا يمكن إعادة تسجيل الجاهزية ذاتياً.');
+    }
 
     return ok_({
       success: true,

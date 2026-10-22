@@ -1204,6 +1204,496 @@ function getNextFriday(now = new Date()) {
       const mainSchedExcused = await api({ action: 'getSchedule', token, date: fridayDate });
       assert(mainSchedExcused.data.khatibReadiness['K002'] === 'excused', 'khatibReadiness reflects excused');
     }),
+
+    test('Scenario 15: Excuse review after confirmation: workflow, pending state, coordinator accept/reject, bypass defense, role/region checks, concurrent requests, stale reassignment conflict, and coordinator reset', async () => {
+      // 0. Setup: Ensure K001 is assigned to M001 on fridayDate and confirmed
+      const curSched = await api({ action: 'getSchedule', token, date: fridayDate });
+      await api({
+        action: 'saveSchedule',
+        token,
+        date: fridayDate,
+        version: curSched.data.version,
+        changes: [
+          { mosqueId: 'M001', khatibId: 'K001', status: 'confirmed' }
+        ]
+      });
+
+      // Login as K001
+      const k1 = await api({ action: 'khatibLogin', phone: '01011111111' });
+      assert(k1.ok, 'K001 login ok');
+
+      // Verify portal schedule shows confirmed assignment with no pending request
+      let portalSched = await api({ action: 'khatibGetSchedule', token: k1.data.token, date: fridayDate });
+      assert(portalSched.ok, 'portal schedule ok');
+      assert(portalSched.data.assignment.status === 'confirmed', 'assignment is confirmed');
+      assert(!portalSched.data.assignment.excuseRequest || portalSched.data.assignment.excuseRequest.status !== 'pending', 'no pending request initially');
+
+      // 1. K001 attempts excuse after confirmation -> Must become a PENDING REQUEST, not immediate excuse
+      const excuseAttempt = await api({
+        action: 'khatibRespond',
+        token: k1.data.token,
+        date: fridayDate,
+        responseType: 'assignment',
+        status: 'excused',
+        notes: 'عذر صحي طارئ'
+      });
+      assert(excuseAttempt.ok, 'excuse request submitted');
+      assert(excuseAttempt.data.pendingReview === true, 'flagged as pending review');
+      assert(excuseAttempt.data.status === 'confirmed', 'assignment remains confirmed while pending');
+      const reqId = excuseAttempt.data.requestId;
+      assert(reqId, 'request ID generated');
+
+      // Main schedule check: assignment is STILL confirmed, but hasPendingExcuse is true
+      const mainAfterReq = await api({ action: 'getSchedule', token, date: fridayDate });
+      const m1Row = mainAfterReq.data.rows.find(r => r.mosqueId === 'M001');
+      assert(m1Row.status === 'confirmed', 'main schedule assignment status stays confirmed');
+      assert(m1Row.hasPendingExcuse === true, 'main schedule row has pending excuse flag');
+      assert(m1Row.pendingExcuseRequestId === reqId, 'main schedule row has matching requestId');
+
+      // Portal check: portal reflects pending review
+      portalSched = await api({ action: 'khatibGetSchedule', token: k1.data.token, date: fridayDate });
+      assert(portalSched.data.assignment.status === 'confirmed', 'portal assignment stays confirmed');
+      assert(portalSched.data.assignment.excuseRequest.status === 'pending', 'portal exposes pending request');
+
+      // 2. Concurrent two-submit test: simultaneous repeated requests must be idempotent without duplicate key / internal error
+      const [conc1, conc2] = await Promise.all([
+        api({ action: 'khatibRespond', token: k1.data.token, date: fridayDate, responseType: 'assignment', status: 'excused' }),
+        api({ action: 'khatibRespond', token: k1.data.token, date: fridayDate, responseType: 'assignment', status: 'excused' })
+      ]);
+      assert(conc1.ok && conc1.data.pendingReview === true, 'concurrent call 1 succeeds with pending status');
+      assert(conc2.ok && conc2.data.pendingReview === true, 'concurrent call 2 succeeds with pending status');
+      assert(conc1.data.requestId === reqId && conc2.data.requestId === reqId, 'both concurrent requests return existing pending requestId');
+
+      // 3. Bypass defense: K001 calls responseType: 'readiness', status: 'excused' while assignment is confirmed
+      const bypassAttempt = await api({
+        action: 'khatibRespond',
+        token: k1.data.token,
+        date: fridayDate,
+        responseType: 'readiness',
+        status: 'excused'
+      });
+      assert(bypassAttempt.error?.code === 'BAD_REQUEST', 'readiness excuse bypass attempt is rejected');
+
+      // 4. Role check: Viewer cannot review excuse request
+      const viewerLogin = await api({ action: 'createUser', token, username: 'testviewer_excuse', displayName: 'مشاهد', password: 'password123', role: 'viewer', regionAccess: 'both' });
+      assert(viewerLogin.ok, 'viewer created');
+      const viewerAuth = await api({ action: 'login', username: 'testviewer_excuse', password: 'password123' });
+      assert(viewerAuth.ok, 'viewer logged in');
+      const viewerReview = await api({
+        action: 'reviewExcuseRequest',
+        token: viewerAuth.data.token,
+        requestId: reqId,
+        decision: 'accept'
+      });
+      assert(viewerReview.error?.code === 'FORBIDDEN', 'viewer role forbidden from reviewing excuse request');
+
+      // 5. Region check: Coordinator with Tebeen-only access cannot review in 15may
+      const tebeenCoord = await api({ action: 'createUser', token, username: 'coord_tebeen_only', displayName: 'منسق تبين', password: 'password123', role: 'coordinator', regionAccess: 'tebeen' });
+      assert(tebeenCoord.ok, 'tebeen coordinator created');
+      const tebeenAuth = await api({ action: 'login', username: 'coord_tebeen_only', password: 'password123' });
+      assert(tebeenAuth.ok, 'tebeen coord logged in');
+      const wrongRegionReview = await fetch(`${BASE_URL}/?region=15may`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'reviewExcuseRequest', token: tebeenAuth.data.token, requestId: reqId, decision: 'accept' })
+      }).then(r => r.json());
+      assert(wrongRegionReview.error?.code === 'REGION_FORBIDDEN', 'cross-region review attempt is rejected');
+
+      // 6. Rejection workflow: Coordinator rejects request
+      const rejectRes = await api({
+        action: 'reviewExcuseRequest',
+        token,
+        requestId: reqId,
+        decision: 'reject'
+      });
+      assert(rejectRes.ok, 'review rejection succeeds');
+      assert(rejectRes.data.status === 'rejected', 'request status set to rejected');
+
+      // Main schedule check after rejection: remains confirmed, no pending excuse
+      const mainAfterReject = await api({ action: 'getSchedule', token, date: fridayDate });
+      const m1AfterReject = mainAfterReject.data.rows.find(r => r.mosqueId === 'M001');
+      assert(m1AfterReject.status === 'confirmed', 'assignment remains confirmed after rejection');
+      assert(m1AfterReject.hasPendingExcuse === false, 'no pending excuse on row after rejection');
+
+      // Portal check: portal reflects rejection
+      portalSched = await api({ action: 'khatibGetSchedule', token: k1.data.token, date: fridayDate });
+      assert(portalSched.data.assignment.status === 'confirmed', 'portal assignment still confirmed');
+      assert(portalSched.data.assignment.excuseRequest.status === 'rejected', 'portal reflects rejected request');
+
+      // 7. Double review prevention: Calling review again on rejected request fails
+      const doubleReview = await api({
+        action: 'reviewExcuseRequest',
+        token,
+        requestId: reqId,
+        decision: 'accept'
+      });
+      assert(doubleReview.error?.code === 'ALREADY_REVIEWED', 'already reviewed request cannot be reviewed again');
+
+      // 8. Deterministic stale reassignment defense:
+      // K001 submits a new excuse request
+      const secondExcuse = await api({
+        action: 'khatibRespond',
+        token: k1.data.token,
+        date: fridayDate,
+        responseType: 'assignment',
+        status: 'excused',
+        notes: 'عذر ثانٍ'
+      });
+      assert(secondExcuse.ok, 'second excuse request submitted');
+      const reqId2 = secondExcuse.data.requestId;
+
+      // In the meantime, coordinator reassigns M001 to K002
+      const curSched2 = await api({ action: 'getSchedule', token, date: fridayDate });
+      await api({
+        action: 'saveSchedule',
+        token,
+        date: fridayDate,
+        version: curSched2.data.version,
+        changes: [{ mosqueId: 'M001', khatibId: 'K002', status: 'confirmed' }]
+      });
+
+      // Verify that M001 now has K002 and does NOT display K001's pending excuse badge
+      const schedAfterReassign = await api({ action: 'getSchedule', token, date: fridayDate });
+      const m1AfterReassign = schedAfterReassign.data.rows.find(r => r.mosqueId === 'M001');
+      assert(m1AfterReassign.khatibId === 'K002', 'M001 is now assigned to K002');
+      assert(m1AfterReassign.hasPendingExcuse === false, 'stale excuse request is NOT attached to replacement khatib row');
+
+      // Coordinator accepts the old request reqId2 for K001 -> MUST return explicit STALE_REQUEST conflict error!
+      const reviewStale = await api({
+        action: 'reviewExcuseRequest',
+        token,
+        requestId: reqId2,
+        decision: 'accept'
+      });
+      assert(reviewStale.error?.code === 'STALE_REQUEST', 'stale reassigned request accept returns explicit STALE_REQUEST conflict');
+
+      // Rejecting the old request reqId2 MUST also return explicit STALE_REQUEST conflict error!
+      const reviewStaleReject = await api({
+        action: 'reviewExcuseRequest',
+        token,
+        requestId: reqId2,
+        decision: 'reject'
+      });
+      assert(reviewStaleReject.error?.code === 'STALE_REQUEST', 'stale reassigned request reject returns explicit STALE_REQUEST conflict');
+
+      // Verify M001 assignment for K002 is completely untouched!
+      const mainAfterStale = await api({ action: 'getSchedule', token, date: fridayDate });
+      const m1Stale = mainAfterStale.data.rows.find(r => r.mosqueId === 'M001');
+      assert(m1Stale.khatibId === 'K002' && m1Stale.status === 'confirmed', 'replacement khatib K002 untouched and confirmed');
+
+      // 9. Clean accept workflow:
+      // Reassign K001 to M001 and confirm
+      const curSched3 = await api({ action: 'getSchedule', token, date: fridayDate });
+      await api({
+        action: 'saveSchedule',
+        token,
+        date: fridayDate,
+        version: curSched3.data.version,
+        changes: [{ mosqueId: 'M001', khatibId: 'K001', status: 'confirmed' }]
+      });
+
+      // K001 submits excuse request
+      const thirdExcuse = await api({
+        action: 'khatibRespond',
+        token: k1.data.token,
+        date: fridayDate,
+        responseType: 'assignment',
+        status: 'excused'
+      });
+      assert(thirdExcuse.ok, 'third excuse request submitted');
+      const reqId3 = thirdExcuse.data.requestId;
+
+      // Coordinator accepts request
+      const acceptRes = await api({
+        action: 'reviewExcuseRequest',
+        token,
+        requestId: reqId3,
+        decision: 'accept'
+      });
+      assert(acceptRes.ok, 'review acceptance succeeds');
+      assert(acceptRes.data.status === 'accepted', 'request status is accepted');
+      assert(acceptRes.data.assignmentModified === true, 'assignment modified to excused');
+
+      // Verify main schedule: M001 is now excused!
+      const mainAfterAccept = await api({ action: 'getSchedule', token, date: fridayDate });
+      const m1Accepted = mainAfterAccept.data.rows.find(r => r.mosqueId === 'M001');
+      assert(m1Accepted.status === 'excused', 'assignment is excused in main schedule');
+      assert(mainAfterAccept.data.khatibReadiness['K001'] === 'excused', 'weekly readiness synchronized to excused');
+
+      // 10. Self-reconfirmation prevention while in accepted excuse cycle:
+      // K001 tries to re-confirm via portal -> Forbidden
+      const undoAttempt = await api({
+        action: 'khatibRespond',
+        token: k1.data.token,
+        date: fridayDate,
+        responseType: 'assignment',
+        status: 'confirmed'
+      });
+      assert(undoAttempt.error?.code === 'FORBIDDEN', 'self-reconfirmation after accepted excuse is blocked');
+
+      const undoReadinessAttempt = await api({
+        action: 'khatibRespond',
+        token: k1.data.token,
+        date: fridayDate,
+        responseType: 'readiness',
+        status: 'ready'
+      });
+      assert(undoReadinessAttempt.error?.code === 'FORBIDDEN', 'readiness self-reconfirmation after accepted excuse is blocked');
+
+      // 11. Regression: Coordinator resets assignment to unassigned -> Portal confirmation succeeds!
+      const curSched4 = await api({ action: 'getSchedule', token, date: fridayDate });
+      const resetRes = await api({
+        action: 'saveSchedule',
+        token,
+        date: fridayDate,
+        version: curSched4.data.version,
+        changes: [{ mosqueId: 'M001', khatibId: 'K001', status: 'unassigned' }]
+      });
+      assert(resetRes.ok, 'coordinator reset to unassigned succeeds');
+
+      // Portal schedule now shows unassigned without being locked by accepted excuse
+      portalSched = await api({ action: 'khatibGetSchedule', token: k1.data.token, date: fridayDate });
+      assert(portalSched.data.assignment.status === 'unassigned', 'portal assignment shows unassigned after reset');
+      assert(!portalSched.data.assignment.excuseRequest, 'excuseRequest is not active/locking after reset');
+
+      // Khatib re-confirms attendance from portal -> SUCCEEDS!
+      const reConfirmRes = await api({
+        action: 'khatibRespond',
+        token: k1.data.token,
+        date: fridayDate,
+        responseType: 'assignment',
+        status: 'confirmed'
+      });
+      assert(reConfirmRes.ok && reConfirmRes.data.status === 'confirmed', 'portal confirmation succeeds after coordinator reset');
+
+      const mainAfterReconfirm = await api({ action: 'getSchedule', token, date: fridayDate });
+      const m1Reconfirmed = mainAfterReconfirm.data.rows.find(r => r.mosqueId === 'M001');
+      assert(m1Reconfirmed.status === 'confirmed', 'assignment is confirmed after portal reply');
+
+      // Idempotent confirmation: Confirming already confirmed assignment must not advance version
+      const vBefore = (await api({ action: 'getSchedule', token, date: fridayDate })).data.rows.find(r => r.mosqueId === 'M001').updatedAt;
+      const reConfirmIdempotent = await api({
+        action: 'khatibRespond',
+        token: k1.data.token,
+        date: fridayDate,
+        responseType: 'assignment',
+        status: 'confirmed'
+      });
+      assert(reConfirmIdempotent.ok, 'idempotent confirmation succeeds');
+      const vAfter = (await api({ action: 'getSchedule', token, date: fridayDate })).data.rows.find(r => r.mosqueId === 'M001').updatedAt;
+      assert(vBefore === vAfter, 'confirming already confirmed assignment does not advance updatedAt version');
+    }),
+    test('Scenario 16: Forward migration preserves populated legacy schema with 0 lost records and enforces partial index constraints', async () => {
+      const { DatabaseSync } = await import('node:sqlite');
+      const nodeAssert = await import('node:assert/strict');
+      const fs = await import('node:fs');
+      const path = await import('node:path');
+
+      const dbMem = new DatabaseSync(':memory:');
+      const schemaPath = path.resolve(workerDir, 'schema.sql');
+      const schemaText = fs.readFileSync(schemaPath, 'utf8');
+      const legacySchema = schemaText.split('-- 11. طلبات مراجعة الاعتذار')[0];
+      dbMem.exec(legacySchema);
+
+      // Populate populated legacy records across all existing tables
+      dbMem.exec(`
+        INSERT INTO users (username, display_name, password_hash, salt, active, created_at, role, region_access)
+        VALUES ('legacy_admin', 'أدمن سابق', 'hash123', 'salt123', 1, '2026-09-01T00:00:00Z', 'admin', 'both');
+        INSERT INTO mosques (id, name, mujawra, address, permanent_khatib_id, active, created_at, sort_order)
+        VALUES ('M100', 'مسجد قديم', 'مجاورة 10', 'شارع قديم', 'K100', 1, '2026-09-01T00:00:00Z', 1);
+        INSERT INTO khatibs (id, name, phone, type, notes, active, created_at)
+        VALUES ('K100', 'خطيب قديم', '01099887766', 'primary', 'ملاحظة', 1, '2026-09-01T00:00:00Z');
+        INSERT INTO assignments (id, date, mosque_id, khatib_id, status, date_type, label, updated_by, updated_at)
+        VALUES ('2026-10-23_M100', '2026-10-23', 'M100', 'K100', 'confirmed', 'friday', '', 'legacy_admin', '2026-09-01T00:00:00Z');
+        INSERT INTO khatib_readiness (date, khatib_id, status, updated_at)
+        VALUES ('2026-10-23', 'K100', 'ready', '2026-09-01T00:00:00Z');
+        INSERT INTO settings (key, value) VALUES ('legacy_key', 'legacy_val');
+      `);
+
+      const usersBefore = dbMem.prepare('SELECT * FROM users').all();
+      const mosquesBefore = dbMem.prepare('SELECT * FROM mosques').all();
+      const khatibsBefore = dbMem.prepare('SELECT * FROM khatibs').all();
+      const assignmentsBefore = dbMem.prepare('SELECT * FROM assignments').all();
+      const readinessBefore = dbMem.prepare('SELECT * FROM khatib_readiness').all();
+      const settingsBefore = dbMem.prepare('SELECT * FROM settings').all();
+
+      // Apply migration 0005_excuse_requests.sql
+      const migrationPath = path.resolve(workerDir, 'migrations', '0005_excuse_requests.sql');
+      const migrationSql = fs.readFileSync(migrationPath, 'utf8');
+      dbMem.exec(migrationSql);
+
+      // Verify all legacy rows preserved with 0 lost records (real deep strict equality)
+      nodeAssert.deepStrictEqual(dbMem.prepare('SELECT * FROM users').all(), usersBefore);
+      nodeAssert.deepStrictEqual(dbMem.prepare('SELECT * FROM mosques').all(), mosquesBefore);
+      nodeAssert.deepStrictEqual(dbMem.prepare('SELECT * FROM khatibs').all(), khatibsBefore);
+      nodeAssert.deepStrictEqual(dbMem.prepare('SELECT * FROM assignments').all(), assignmentsBefore);
+      nodeAssert.deepStrictEqual(dbMem.prepare('SELECT * FROM khatib_readiness').all(), readinessBefore);
+      nodeAssert.deepStrictEqual(dbMem.prepare('SELECT * FROM settings').all(), settingsBefore);
+
+      // Verify excuse_requests table is created and operational
+      dbMem.exec(`
+        INSERT INTO excuse_requests (id, date, mosque_id, khatib_id, assignment_version, status, notes, created_at)
+        VALUES ('REQ_MIG_1', '2026-10-23', 'M100', 'K100', '2026-09-01T00:00:00Z', 'pending', 'طلب بعد الترقية', '2026-10-22T00:00:00Z');
+      `);
+      const req = dbMem.prepare('SELECT * FROM excuse_requests WHERE id = ?').get('REQ_MIG_1');
+      assert(req.id === 'REQ_MIG_1', 'req id matches');
+      assert(req.status === 'pending', 'req status is pending');
+      assert(req.assignment_version === '2026-09-01T00:00:00Z', 'assignment_version preserved');
+
+      // Verify partial unique index blocks duplicate pending requests
+      let blockedDuplicate = false;
+      try {
+        dbMem.exec(`
+          INSERT INTO excuse_requests (id, date, mosque_id, khatib_id, assignment_version, status, notes, created_at)
+          VALUES ('REQ_MIG_2', '2026-10-23', 'M100', 'K100', '2026-09-01T00:00:00Z', 'pending', 'طلب مكرر', '2026-10-22T00:05:00Z');
+        `);
+      } catch (err) {
+        blockedDuplicate = true;
+        assert(err.message.includes('UNIQUE'), 'partial index enforces uniqueness');
+      }
+      assert(blockedDuplicate, 'duplicate pending request was blocked by database index');
+    }),
+    test('Scenario 17: Deterministic concurrency, barrier interleavings, and atomic CAS race defenses on real handler', async () => {
+      const { DatabaseSync } = await import('node:sqlite');
+      const fs = await import('node:fs');
+      const path = await import('node:path');
+      const { khatibRespond_, currentSermonDate_ } = await import('../src/khatib-portal.js');
+
+      const schemaPath = path.resolve(workerDir, 'schema.sql');
+      const schemaText = fs.readFileSync(schemaPath, 'utf8');
+
+      function setupDb() {
+        const s = new DatabaseSync(':memory:');
+        s.exec(schemaText);
+        const date = currentSermonDate_();
+        s.prepare('INSERT INTO khatibs(id,name,phone,type,active,created_at) VALUES (?,?,?,?,?,?)').run('K1','خطيب 1','01012345678','primary',1,'2026-01-01');
+        s.prepare('INSERT INTO khatibs(id,name,phone,type,active,created_at) VALUES (?,?,?,?,?,?)').run('K2','خطيب 2','01098765432','primary',1,'2026-01-01');
+        s.prepare('INSERT INTO mosques(id,name,mujawra,active,created_at,sort_order) VALUES (?,?,?,?,?,?)').run('M1','مسجد التجربة','Area',1,'2026-01-01',1);
+        s.prepare('INSERT INTO khatib_sessions(token,khatib_id,phone,expires_at) VALUES (?,?,?,?)').run('review-token','K1','01012345678','2099-01-01');
+        return { s, date, assignId: date + '_M1' };
+      }
+
+      function makeAdapter(s, onFirst) {
+        return {
+          prepare(sql) {
+            let binds = [];
+            return {
+              bind(...args) { binds = args; return this; },
+              async first() {
+                const row = s.prepare(sql).get(...binds);
+                if (onFirst) {
+                  onFirst(sql, binds, row);
+                }
+                return row || null;
+              },
+              async all() { return { results: s.prepare(sql).all(...binds) }; },
+              async run() {
+                const meta = s.prepare(sql).run(...binds);
+                return { success: true, meta: { changes: meta.changes } };
+              }
+            };
+          },
+          async batch(stmts) {
+            s.exec('BEGIN');
+            try {
+              let res = [];
+              for (const stmt of stmts) res.push(await stmt.run());
+              s.exec('COMMIT');
+              return res;
+            } catch (e) {
+              s.exec('ROLLBACK');
+              throw e;
+            }
+          }
+        };
+      }
+
+      // Case 1: Interleaved concurrent acceptance during idempotent confirmation (Reviewer reproducer)
+      {
+        const { s, date, assignId } = setupDb();
+        s.prepare('INSERT INTO assignments(id,date,mosque_id,khatib_id,status,date_type,label,updated_by,updated_at) VALUES (?,?,?,?,?,?,?,?,?)').run(assignId,date,'M1','K1','confirmed','friday','','admin','v1');
+        s.prepare('INSERT INTO khatib_readiness(date,khatib_id,status,updated_at) VALUES (?,?,?,?)').run(date,'K1','ready','v1');
+
+        const db = makeAdapter(s, (sql) => {
+          if (/SELECT id, mosque_id, status, updated_at FROM assignments/.test(sql)) {
+            s.prepare('UPDATE assignments SET status=?,updated_at=? WHERE id=?').run('excused','v2',assignId);
+            s.prepare('UPDATE khatib_readiness SET status=?,updated_at=? WHERE date=? AND khatib_id=?').run('excused','v2',date,'K1');
+          }
+        });
+
+        const res = await khatibRespond_(db, { token: 'review-token', date, responseType: 'assignment', status: 'confirmed' });
+        assert(!res.ok, 'delayed confirm after acceptance returns conflict');
+        assert(res.error?.code === 'CONFLICT', 'error code is CONFLICT');
+        const readiness = s.prepare('SELECT status FROM khatib_readiness WHERE date=? AND khatib_id=?').get(date, 'K1').status;
+        assert(readiness === 'excused', 'readiness is preserved as excused');
+      }
+
+      // Case 2: Interleaved concurrent confirmation during delayed initial-excuse
+      {
+        const { s, date, assignId } = setupDb();
+        s.prepare('INSERT INTO assignments(id,date,mosque_id,khatib_id,status,date_type,label,updated_by,updated_at) VALUES (?,?,?,?,?,?,?,?,?)').run(assignId,date,'M1','K1','unassigned','friday','','admin','v1');
+
+        const db = makeAdapter(s, (sql) => {
+          if (/SELECT id, mosque_id, status, updated_at FROM assignments/.test(sql)) {
+            s.prepare('UPDATE assignments SET status=?,updated_at=? WHERE id=?').run('confirmed','v2',assignId);
+            s.prepare('INSERT INTO khatib_readiness(date,khatib_id,status,updated_at) VALUES (?,?,?,?)').run(date,'K1','ready','v2');
+          }
+        });
+
+        const res = await khatibRespond_(db, { token: 'review-token', date, responseType: 'assignment', status: 'excused' });
+        assert(!res.ok, 'delayed initial-excuse after concurrent confirmation returns conflict');
+        assert(res.error?.code === 'CONFLICT', 'error code is CONFLICT');
+        const assignStatus = s.prepare('SELECT status FROM assignments WHERE id=?').get(assignId).status;
+        assert(assignStatus === 'confirmed', 'assignment stays confirmed without review bypass');
+        const readiness = s.prepare('SELECT status FROM khatib_readiness WHERE date=? AND khatib_id=?').get(date, 'K1').status;
+        assert(readiness === 'ready', 'readiness remains ready');
+      }
+
+      // Case 3: Interleaved reassignment during pending excuse creation
+      {
+        const { s, date, assignId } = setupDb();
+        s.prepare('INSERT INTO assignments(id,date,mosque_id,khatib_id,status,date_type,label,updated_by,updated_at) VALUES (?,?,?,?,?,?,?,?,?)').run(assignId,date,'M1','K1','confirmed','friday','','admin','v1');
+
+        const db = makeAdapter(s, (sql) => {
+          if (/SELECT id, mosque_id, status, updated_at FROM assignments/.test(sql)) {
+            s.prepare('UPDATE assignments SET khatib_id=?,updated_at=? WHERE id=?').run('K2','v2',assignId);
+          }
+        });
+
+        const res = await khatibRespond_(db, { token: 'review-token', date, responseType: 'assignment', status: 'excused' });
+        assert(!res.ok, 'pending creation after reassignment returns conflict');
+        assert(res.error?.code === 'CONFLICT', 'error code is CONFLICT');
+        const reqCount = s.prepare('SELECT COUNT(*) as count FROM excuse_requests WHERE khatib_id=?').get('K1').count;
+        assert(reqCount === 0, 'stale pending request not created');
+      }
+
+      // Case 4: Readiness-only excuse attempt with confirmed assignment
+      {
+        const { s, date, assignId } = setupDb();
+        s.prepare('INSERT INTO assignments(id,date,mosque_id,khatib_id,status,date_type,label,updated_by,updated_at) VALUES (?,?,?,?,?,?,?,?,?)').run(assignId,date,'M1','K1','confirmed','friday','','admin','v1');
+
+        const db = makeAdapter(s);
+        const res = await khatibRespond_(db, { token: 'review-token', date, responseType: 'readiness', status: 'excused' });
+        assert(!res.ok, 'readiness excuse rejected when confirmed assignment exists');
+        assert(res.error?.code === 'BAD_REQUEST', 'error code is BAD_REQUEST');
+        const readyRow = s.prepare('SELECT * FROM khatib_readiness WHERE date=? AND khatib_id=?').get(date, 'K1');
+        assert(readyRow === undefined, 'readiness not inserted');
+      }
+
+      // Case 5: Idempotent confirmation when assignment is genuinely confirmed and unchanged
+      {
+        const { s, date, assignId } = setupDb();
+        s.prepare('INSERT INTO assignments(id,date,mosque_id,khatib_id,status,date_type,label,updated_by,updated_at) VALUES (?,?,?,?,?,?,?,?,?)').run(assignId,date,'M1','K1','confirmed','friday','','admin','v1');
+        s.prepare('INSERT INTO khatib_readiness(date,khatib_id,status,updated_at) VALUES (?,?,?,?)').run(date,'K1','ready','v1');
+
+        const db = makeAdapter(s);
+        const res = await khatibRespond_(db, { token: 'review-token', date, responseType: 'assignment', status: 'confirmed' });
+        assert(res.ok, 'idempotent confirmation succeeds');
+        const assignRow = s.prepare('SELECT status, updated_at FROM assignments WHERE id=?').get(assignId);
+        assert(assignRow.status === 'confirmed');
+        assert(assignRow.updated_at === 'v1', 'assignment version not bumped on idempotent confirmation');
+      }
+    }),
     test('New assignments await confirmation; regeneration and omitted statuses preserve intent', async () => {
       const date = addDays(fridayDate, 35);
       assert((await api({ action: 'updateMosque', token, id: 'M001', name: 'مسجد النور', mujawra: 'مجاورة 1', active: true, permanentKhatibId: 'K001' })).ok, 'set permanent khatib for test');
