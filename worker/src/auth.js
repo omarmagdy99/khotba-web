@@ -75,7 +75,7 @@ export async function login_(db, env, b, requestOrIp) {
 
   await run(db, 'INSERT INTO sessions (token, username, expires_at) VALUES (?, ?, ?)', token, u.username, expires);
 
-  return ok_({ token, username: u.username, displayName: u.display_name, role: u.role, expiresAt: expires });
+  return ok_({ token, username: u.username, displayName: u.display_name, role: u.role, regionAccess: u.region_access, expiresAt: expires });
 }
 
 async function recordLoginFailure_(db, ipKey, uKey, cutoffIso) {
@@ -116,7 +116,7 @@ export async function auth_(db, token) {
   if (!token) return null;
 
   const row = await one(db, `
-    SELECT u.username, u.display_name, u.password_hash, u.salt, u.active, u.created_at, u.role, s.expires_at
+    SELECT u.username, u.display_name, u.password_hash, u.salt, u.active, u.created_at, u.role, u.region_access, s.expires_at
     FROM sessions s
     JOIN users u ON u.username = s.username
     WHERE s.token = ?
@@ -139,11 +139,12 @@ export async function auth_(db, token) {
     active: row.active,
     created_at: row.created_at,
     role: row.role,
+    region_access: row.region_access,
   };
 }
 
 export function whoami_(user) {
-  return ok_({ username: user.username, displayName: user.display_name, role: user.role });
+  return ok_({ username: user.username, displayName: user.display_name, role: user.role, regionAccess: user.region_access });
 }
 
 /**

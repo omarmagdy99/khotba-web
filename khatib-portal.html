@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>بوابة الخطباء — أوقاف 15 مايو</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.rtl.min.css">
+  <link rel="stylesheet" href="assets/style.css">
+  <style>
+    .portal-card {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      padding: 24px;
+      margin-bottom: 20px;
+      box-shadow: 0 4px 18px rgba(0,0,0,0.05);
+      transition: all .25s ease;
+    }
+    .portal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--line);
+      margin-bottom: 20px;
+    }
+    .khatib-name-badge {
+      font-size: 1.15em;
+      font-weight: 700;
+      color: var(--navy);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .assignment-box {
+      border: 2px solid #bae6fd;
+      background: #f0f9ff;
+      border-radius: 16px;
+      padding: 20px;
+      margin-top: 14px;
+    }
+    .assignment-box.confirmed {
+      border-color: #bbf7d0;
+      background: #f0fdf4;
+    }
+    .assignment-box.excused {
+      border-color: #fecaca;
+      background: #fef2f2;
+    }
+    .mosque-title {
+      font-size: 1.35em;
+      font-weight: 700;
+      color: var(--navy);
+      margin-bottom: 8px;
+    }
+    .details-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      margin: 16px 0;
+      font-size: 0.95em;
+    }
+    .detail-item {
+      background: #fff;
+      padding: 10px 14px;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+    }
+    .detail-label {
+      color: var(--muted);
+      font-size: 0.82em;
+      margin-bottom: 2px;
+    }
+    .detail-val {
+      font-weight: 600;
+      color: #0f172a;
+    }
+    .action-row {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 18px;
+    }
+    .action-row .btn {
+      flex: 1;
+      min-width: 160px;
+      padding: 12px 18px;
+      font-size: 1em;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    .readiness-box {
+      text-align: center;
+      padding: 26px 18px;
+      background: #f8fafc;
+      border: 1px dashed #cbd5e1;
+      border-radius: 16px;
+      margin-top: 14px;
+    }
+    .readiness-status-badge {
+      display: inline-block;
+      padding: 6px 16px;
+      border-radius: 50px;
+      font-weight: 700;
+      font-size: 0.95em;
+      margin: 12px 0 16px;
+    }
+    .readiness-status-badge.ready {
+      background: #dcfce7;
+      color: #166534;
+      border: 1px solid #86efac;
+    }
+    .readiness-status-badge.excused {
+      background: #fee2e2;
+      color: #991b1b;
+      border: 1px solid #fca5a5;
+    }
+    .readiness-status-badge.undecided {
+      background: #f1f5f9;
+      color: #64748b;
+      border: 1px solid #cbd5e1;
+    }
+  </style>
+</head>
+<body data-no-loader="1">
+  <div class="container" style="max-width: 650px; margin-top: 20px;">
+    <!-- شاشة تسجيل الدخول برقم الهاتف -->
+    <div id="loginSection" style="display: none;">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <div style="font-size: 3em; margin-bottom: 8px;">🎙️</div>
+        <h1 style="font-size: 1.5em; margin-bottom: 6px;">بوابة السادة الخطباء</h1>
+        <p class="muted">أوقاف 15 مايو — تسجيل الحضور والاعتذار عن خطبة الجمعة</p>
+      </div>
+
+      <div class="portal-card">
+        <form id="phoneLoginForm">
+          <div class="field mb-3">
+            <label for="phoneNumber" style="font-size: 0.95em; font-weight: 700;">رقم الهاتف المحمول</label>
+            <input type="tel" id="phoneNumber" dir="ltr" class="form-control" placeholder="01xxxxxxxxx" maxlength="11" required autocomplete="tel" style="font-size: 1.15em; text-align: center; letter-spacing: 2px;">
+            <div class="hint">أدخل رقم هاتفك المسجل لدى إدارة الأوقاف (11 رقماً يبدأ بـ 01).</div>
+          </div>
+
+          <div id="loginError" class="notice notice-err" style="display: none;"></div>
+
+          <button type="submit" class="btn btn-ok w-100" id="loginBtn" style="padding: 12px; font-size: 1.05em;">
+            دخول إلى البوابة ←
+          </button>
+        </form>
+      </div>
+
+      <div style="text-align: center; font-size: 0.88em; color: var(--muted); margin-top: 16px;">
+        إذا تغير رقم هاتفك أو واجهتك مشكلة في الدخول، يرجى مراجعة مسؤول التنسيق بإدارة الأوقاف.
+      </div>
+    </div>
+
+    <!-- شاشة الخطيب الرئيسية بعد الدخول -->
+    <div id="dashboardSection" style="display: none;">
+      <div class="portal-card">
+        <div class="portal-header">
+          <div class="khatib-name-badge">
+            <span>🎙️</span>
+            <span id="khatibNameText">الشيخ ...</span>
+            <span id="khatibTypeBadge" class="badge badge-primary" style="font-size: 0.75em;">أساسي</span>
+          </div>
+          <button type="button" class="btn btn-plain btn-sm" id="logoutBtn" style="text-decoration: none;">
+            تسجيل خروج
+          </button>
+        </div>
+
+        <!-- اختيار تاريخ الجمعة -->
+        <div class="mb-3">
+          <label style="font-weight: 600; font-size: 0.9em; margin-bottom: 6px; display: block;">الخطبة الحالية:</label>
+          <div class="friday-chips" id="fridayChips"></div>
+        </div>
+
+        <!-- محتوى الجمعة المحددة -->
+        <div id="fridayContent">
+          <div class="state"><div class="spinner"></div><p>جاري تحميل البيانات...</p></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="config.js"></script>
+  <script src="assets/app.js"></script>
+  <script>
+    var currentKhatib = null;
+    var khatibTokenKey = 'awqaf_khatib_token_' + REGION_ID;
+    var currentToken = localStorage.getItem(khatibTokenKey) || '';
+    var selectedDate = '';
+
+    (async function init() {
+      if (currentToken) {
+        showDashboardLoading();
+        try {
+          var me = await api('khatibWhoami', { token: currentToken });
+          currentKhatib = me.khatib;
+          showDashboard();
+          return;
+        } catch (e) {
+          localStorage.removeItem(khatibTokenKey);
+          currentToken = '';
+        }
+      }
+      showLogin();
+    })();
+
+    function showLogin() {
+      el('loginSection').style.display = 'block';
+      el('dashboardSection').style.display = 'none';
+      el('phoneNumber').focus();
+    }
+
+    function showDashboardLoading() {
+      el('loginSection').style.display = 'none';
+      el('dashboardSection').style.display = 'block';
+      el('khatibNameText').textContent = 'فضيلة الشيخ...';
+      el('fridayContent').innerHTML = '<div class="state"><div class="spinner"></div><p>جاري تحميل البيانات...</p></div>';
+    }
+
+    function showDashboard() {
+      el('loginSection').style.display = 'none';
+      el('dashboardSection').style.display = 'block';
+      el('khatibNameText').textContent = 'الشيخ ' + currentKhatib.name;
+      el('khatibTypeBadge').textContent = currentKhatib.type === 'volunteer' ? 'متطوع' : 'أساسي';
+      el('khatibTypeBadge').className = 'badge ' + (currentKhatib.type === 'volunteer' ? 'badge-volunteer' : 'badge-primary');
+
+      loadFridayData(selectedDate);
+    }
+
+    // تسجيل الدخول بالهاتف
+    el('phoneLoginForm').addEventListener('submit', async function (ev) {
+      ev.preventDefault();
+      var phoneInput = el('phoneNumber').value.trim();
+      var errBox = el('loginError');
+      var btn = el('loginBtn');
+
+      errBox.style.display = 'none';
+      btn.disabled = true;
+      btn.textContent = 'جاري التحقق...';
+
+      try {
+        var res = await api('khatibLogin', { phone: phoneInput });
+        currentToken = res.token;
+        currentKhatib = res.khatib;
+        localStorage.setItem(khatibTokenKey, currentToken);
+        showDashboard();
+      } catch (err) {
+        errBox.textContent = err.message || 'حدث خطأ أثناء الدخول';
+        errBox.style.display = 'block';
+        el('phoneNumber').focus();
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'دخول إلى البوابة ←';
+      }
+    });
+
+    // تسجيل الخروج
+    el('logoutBtn').addEventListener('click', function () {
+      localStorage.removeItem(khatibTokenKey);
+      currentToken = '';
+      currentKhatib = null;
+      selectedDate = '';
+      el('phoneNumber').value = '';
+      el('loginError').style.display = 'none';
+      showLogin();
+    });
+
+    // جلب بيانات الجمعة
+    async function loadFridayData(date) {
+      var contentBox = el('fridayContent');
+      contentBox.innerHTML = '<div class="state"><div class="spinner"></div><p>جاري تحميل بيانات الخطبة...</p></div>';
+
+      try {
+        var res = await api('khatibGetSchedule', { token: currentToken, date: date });
+        selectedDate = res.date;
+        renderFridayChips(res.availableDates, selectedDate);
+        renderFridayDetails(res);
+      } catch (err) {
+        if (err.code === 'SERMON_CLOSED' && date) {
+          selectedDate = '';
+          return loadFridayData('');
+        }
+        if (err.code === 'UNAUTHENTICATED') {
+          localStorage.removeItem(khatibTokenKey);
+          currentToken = '';
+          currentKhatib = null;
+          selectedDate = '';
+          showLogin();
+          return;
+        }
+        contentBox.innerHTML = '<div class="state error"><p>' + esc(err.message) + '</p>' +
+          '<button class="btn btn-sm btn-plain" onclick="loadFridayData(\'' + esc(date) + '\')">إعادة المحاولة</button></div>';
+      }
+    }
+
+    function renderFridayChips(dates, activeDate) {
+      var chipsBox = el('fridayChips');
+      if (!dates || !dates.length) {
+        chipsBox.innerHTML = '';
+        return;
+      }
+      chipsBox.innerHTML = dates.map(function (d) {
+        var isActive = (d === activeDate);
+        return '<button type="button" class="chip' + (isActive ? ' active' : '') + '" onclick="selectDate(\'' + esc(d) + '\')">' +
+          esc(formatDate(d)) + '</button>';
+      }).join('');
+    }
+
+    window.selectDate = function (date) {
+      if (date === selectedDate) return;
+      selectedDate = date;
+      loadFridayData(date);
+    };
+
+    function renderFridayDetails(data) {
+      var contentBox = el('fridayContent');
+      var dateLabel = formatDate(data.date);
+
+      if (data.hasAssignment && data.assignment) {
+        var a = data.assignment;
+        var statusBadge = '';
+        var boxClass = 'assignment-box';
+
+        if (a.status === 'confirmed') {
+          boxClass += ' confirmed';
+          statusBadge = '<span class="badge badge-volunteer" style="font-size:0.9em">✅ مؤكد الحضور</span>';
+        } else if (a.status === 'excused') {
+          boxClass += ' excused';
+          statusBadge = '<span class="badge badge-warn" style="font-size:0.9em;background:#fee2e2;color:#991b1b">⚠️ مسجل كـ معتذر</span>';
+        } else {
+          statusBadge = '<span class="badge badge-off" style="font-size:0.9em">⏳ بانتظار تأكيدك</span>';
+        }
+
+        var html = '<div class="' + boxClass + '">' +
+          '<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px">' +
+            '<div>' +
+              '<div class="detail-label">مسجد الخطبة المكلف به:</div>' +
+              '<div class="mosque-title">🕌 ' + esc(a.mosqueName) + '</div>' +
+            '</div>' +
+            '<div>' + statusBadge + '</div>' +
+          '</div>' +
+
+          '<div class="details-grid">' +
+            '<div class="detail-item">' +
+              '<div class="detail-label">المنطقة / المجاورة</div>' +
+              '<div class="detail-val">📍 ' + esc(a.mujawra || '—') + '</div>' +
+            '</div>' +
+            '<div class="detail-item">' +
+              '<div class="detail-label">تاريخ الجمعة</div>' +
+              '<div class="detail-val">📅 ' + esc(dateLabel) + '</div>' +
+            '</div>' +
+            (a.address ? ('<div class="detail-item" style="grid-column: 1 / -1">' +
+              '<div class="detail-label">العنوان بالتفصيل</div>' +
+              '<div class="detail-val">' + esc(a.address) + '</div>' +
+            '</div>') : '') +
+            (a.label ? ('<div class="detail-item" style="grid-column: 1 / -1">' +
+              '<div class="detail-label">المناسبة</div>' +
+              '<div class="detail-val">' + esc(a.label) + '</div>' +
+            '</div>') : '') +
+          '</div>' +
+
+          '<div style="font-weight:600;font-size:0.95em;color:var(--navy);margin-top:14px">يرجى تأكيد حضورك أو تسجيل اعتذارك:</div>' +
+          '<div class="action-row">' +
+            '<button type="button" class="btn btn-ok" onclick="respondAssignment(\'' + esc(data.date) + '\', \'confirmed\')" ' +
+              (a.status === 'confirmed' ? 'disabled' : '') + '>' +
+              '<span>✅</span> أؤكد حضوري للخطبة' +
+            '</button>' +
+            '<button type="button" class="btn btn-danger" onclick="respondAssignment(\'' + esc(data.date) + '\', \'excused\')" ' +
+              (a.status === 'excused' ? 'disabled' : '') + '>' +
+              '<span>⚠️</span> أعتذر عن أداء الخطبة' +
+            '</button>' +
+          '</div>' +
+        '</div>';
+
+        contentBox.innerHTML = html;
+
+      } else {
+        // ليس لديه تكليف بمسجد معين في هذه الجمعة
+        var readiness = data.readiness || 'undecided';
+        var badgeHtml = '';
+        if (readiness === 'ready') {
+          badgeHtml = '<div class="readiness-status-badge ready">🟢 مسجل حالياً: مستعد للخطابة في حال طُلب منك</div>';
+        } else if (readiness === 'excused') {
+          badgeHtml = '<div class="readiness-status-badge excused">🚫 مسجل حالياً: معتذر عن الخطابة في هذه الجمعة</div>';
+        } else {
+          badgeHtml = '<div class="readiness-status-badge undecided">⚪ لم تحدد موقفك بعد لهذه الجمعة</div>';
+        }
+
+        var html = '<div class="readiness-box">' +
+          '<div style="font-size:2.4em;margin-bottom:8px">🕌</div>' +
+          '<h3 style="font-size:1.15em;color:var(--navy);margin-bottom:6px">ليس لديك مسجد مكلف به في جمعة ' + esc(dateLabel) + '</h3>' +
+          '<p class="muted" style="max-width:440px;margin:0 auto 12px;font-size:0.92em">' +
+            'هل أنت مستعد ومتاح لإلقاء خطبة الجمعة في حال وُجد مسجد شاغر أو اعتذر أحد الخطباء؟' +
+          '</p>' +
+
+          badgeHtml +
+
+          '<div class="action-row" style="max-width:420px;margin:0 auto">' +
+            '<button type="button" class="btn btn-ok" onclick="respondReadiness(\'' + esc(data.date) + '\', \'ready\')" ' +
+              (readiness === 'ready' ? 'disabled' : '') + '>' +
+              '<span>🟢</span> نعم، مستعد للخطابة' +
+            '</button>' +
+            '<button type="button" class="btn btn-plain" onclick="respondReadiness(\'' + esc(data.date) + '\', \'excused\')" ' +
+              (readiness === 'excused' ? 'disabled' : '') + '>' +
+              '<span>🚫</span> لا، أعتذر عن هذه الجمعة' +
+            '</button>' +
+          '</div>' +
+          '<div style="font-size:0.8em;color:var(--faint);margin-top:14px">الرد متاح للخطبة الحالية فقط.</div>' +
+        '</div>';
+
+        contentBox.innerHTML = html;
+      }
+    }
+
+    // تأكيد أو اعتذار عن مسجد مكلف به
+    window.respondAssignment = async function (date, status) {
+      if (status === 'excused') {
+        if (!confirm('هل أنت متأكد من الاعتذار عن إلقاء الخطبة في هذه الجمعة؟ سيتم إخطار إدارة الأوقاف لتكليف خطيب بديل.')) {
+          return;
+        }
+      }
+      try {
+        var res = await api('khatibRespond', {
+          token: currentToken,
+          date: date,
+          responseType: 'assignment',
+          status: status
+        });
+        toast(res.message, status === 'confirmed' ? 'ok' : 'warn');
+        loadFridayData(date);
+      } catch (err) {
+        toast(err.message, 'err');
+        if (err.code === 'SERMON_CLOSED') { selectedDate = ''; loadFridayData(''); }
+      }
+    };
+
+    // إبداء الجاهزية أو الاعتذار لغير المكلفين
+    window.respondReadiness = async function (date, status) {
+      try {
+        var res = await api('khatibRespond', {
+          token: currentToken,
+          date: date,
+          responseType: 'readiness',
+          status: status
+        });
+        toast(res.message, status === 'ready' ? 'ok' : 'warn');
+        loadFridayData(date);
+      } catch (err) {
+        toast(err.message, 'err');
+        if (err.code === 'SERMON_CLOSED') { selectedDate = ''; loadFridayData(''); }
+      }
+    };
+  </script>
+</body>
+</html>

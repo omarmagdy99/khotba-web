@@ -5,6 +5,7 @@ import { spawn, execSync } from 'node:child_process';
 import { rmSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { currentSermonDate_ } from '../src/khatib-portal.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -59,7 +60,7 @@ async function api(payload, headers = {}) {
 
 function d1Query(sql) {
   const npxCmd = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-  const out = execSync(`${npxCmd} wrangler d1 execute khotba-db --local --command "${sql.replace(/"/g, '\\"')}" --json`, {
+  const out = execSync(`${npxCmd} wrangler d1 execute khotba-db --local --persist-to .wrangler/test-regions --command "${sql.replace(/"/g, '\\"')}" --json`, {
     cwd: workerDir,
     stdio: ['ignore', 'pipe', 'pipe'],
     shell: true,
@@ -101,7 +102,8 @@ async function main() {
   const npxCmd = process.platform === 'win32' ? 'npx.cmd' : 'npx';
 
   // 1. Delete local D1 state
-  const stateDir = path.join(workerDir, '.wrangler', 'state');
+  const stateDir = path.join(workerDir, '.wrangler', 'test-regions');
+  if (path.resolve(stateDir) !== path.resolve(workerDir, '.wrangler', 'test-regions')) throw new Error('Invalid test state directory');
   if (existsSync(stateDir)) {
     console.log('Deleting local D1 state at:', stateDir);
     rmSync(stateDir, { recursive: true, force: true });
@@ -109,14 +111,16 @@ async function main() {
 
   // 2. Apply schema.sql and test/fixture.sql
   console.log('Applying schema.sql...');
-  execSync(`${npxCmd} wrangler d1 execute khotba-db --local --file=schema.sql`, {
+  execSync(`${npxCmd} wrangler d1 execute khotba-db --local --persist-to .wrangler/test-regions --file=schema.sql`, {
     cwd: workerDir,
     stdio: 'pipe',
     shell: true,
   });
 
+  execSync(`${npxCmd} wrangler d1 execute khotba-tebeen-db --local --persist-to .wrangler/test-regions --file=schema.sql`, { cwd: workerDir, stdio: 'pipe', shell: true });
+
   console.log('Applying test/fixture.sql...');
-  execSync(`${npxCmd} wrangler d1 execute khotba-db --local --file=test/fixture.sql`, {
+  execSync(`${npxCmd} wrangler d1 execute khotba-db --local --persist-to .wrangler/test-regions --file=test/fixture.sql`, {
     cwd: workerDir,
     stdio: 'pipe',
     shell: true,
@@ -124,7 +128,7 @@ async function main() {
 
   // 3. Spawn wrangler dev server
   console.log(`Starting wrangler dev on port ${PORT}...`);
-  devProcess = spawn(`${npxCmd} wrangler dev --local --port ${PORT} --ip 127.0.0.1`, {
+  devProcess = spawn(`${npxCmd} wrangler dev --local --persist-to .wrangler/test-regions --port ${PORT} --ip 127.0.0.1`, {
     cwd: workerDir,
     shell: true,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -171,7 +175,7 @@ function getNextFriday(now = new Date()) {
 }
 
   let token = '';
-  const fridayDate = getNextFriday();
+  const fridayDate = currentSermonDate_();
   const pastDate = addDays(fridayDate, -7);
   const datePlus7 = addDays(fridayDate, 7);
   const datePlus14 = addDays(fridayDate, 14);
@@ -229,7 +233,7 @@ function getNextFriday(now = new Date()) {
       assert(gen.data.rows.length === 4, '4 mosques generated');
       const m1 = gen.data.rows.find(r => r.mosqueId === 'M001');
       assert(m1.khatibId === 'K001', 'M001 has prefilled permanent khatib K001');
-      assert(m1.status === 'confirmed', 'M001 prefilled status is confirmed');
+      assert(m1.status === 'unassigned', 'M001 permanent khatib starts awaiting confirmation');
     }),
 
     test('Scenario C: generateDate twice returns existing schedule without error', async () => {
@@ -897,6 +901,50 @@ function getNextFriday(now = new Date()) {
       assert(res2.headers.get('access-control-allow-origin') === '*', 'CORS origin header must be preserved on cached response');
     }),
 
+    test('Region isolation: empty Tebeen, overlapping IDs, scheduling, publishing and deactivation', async () => {
+      const tebeen = async (payload, region = 'tebeen') => {
+        const response = await fetch(`${BASE_URL}/?region=${region}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token, ...payload }),
+        });
+        return response.json();
+      };
+      const readMay = async () => JSON.stringify(await Promise.all([
+        api({ action: 'listMosques', token, includeInactive: true }),
+        api({ action: 'listKhatibs', token, includeInactive: true }),
+        api({ action: 'listDates', token }), api({ action: 'getSettings', token }),
+        api({ action: 'getSchedule', token, date: fridayDate }),
+        fetch(BASE_URL).then(r => r.json()),
+      ]));
+      const before = await readMay();
+      assert((await tebeen({ action: 'listMosques' })).data.mosques.length === 0, 'Tebeen starts without mosques');
+      assert((await tebeen({ action: 'listKhatibs' })).data.khatibs.length === 0, 'Tebeen starts without khatibs');
+      assert((await tebeen({ action: 'listDates' })).data.dates.length === 0, 'Tebeen starts without schedules');
+      assert(!(await fetch(`${BASE_URL}/?region=tebeen`).then(r => r.json())).data.published, 'Tebeen starts unpublished');
+      assert((await tebeen({ action: 'whoami' })).ok, 'existing account works in Tebeen');
+      const missingArea = await tebeen({ action: 'createMosque', name: 'مسجد تجريبي' });
+      assert(missingArea.error.message === 'اسم المسجد والمنطقة مطلوبان', 'Tebeen validation uses region terminology');
+      assert((await tebeen({ action: 'createKhatib', name: 'خطيب التبين', phone: '01011111111' })).data.id === 'K001', 'IDs and phones can overlap across regions');
+      assert((await tebeen({ action: 'createMosque', name: 'مسجد التبين', mujawra: 'التبين', permanentKhatibId: 'K001' })).data.id === 'M001', 'mosque IDs can overlap');
+      assert((await tebeen({ action: 'setPreferences', khatibId: 'K001', mosqueIds: ['M001'] })).ok, 'preferences saved in Tebeen');
+      const generated = await tebeen({ action: 'generateDate', date: fridayDate });
+      assert(generated.ok && generated.data.rows.length === 1 && generated.data.rows[0].khatib === 'خطيب التبين', 'only Tebeen mosque generated');
+      const saved = await tebeen({ action: 'saveSchedule', date: fridayDate, version: generated.data.version, changes: [{ mosqueId: 'M001', khatibId: 'K001', status: 'confirmed' }] });
+      assert(saved.ok, 'Tebeen schedule saved');
+      assert((await tebeen({ action: 'getKhatibSchedule', khatibId: 'K001' })).data.rows.length === 1, 'khatib schedule isolated');
+      assert((await tebeen({ action: 'getLoadCounts' })).data.counts.K001 === 1, 'load counts isolated');
+      assert((await tebeen({ action: 'publishRange', dates: [fridayDate] })).ok, 'publish Tebeen');
+      const pub = await fetch(`${BASE_URL}/?region=tebeen&date=${fridayDate}`).then(r => r.json());
+      assert(pub.data.rows.length === 1 && pub.data.rows[0].khatib === 'خطيب التبين', 'public Tebeen contains only Tebeen data');
+      assert((await tebeen({ action: 'deactivateKhatib', id: 'K001' })).ok, 'deactivate Tebeen khatib');
+      assert((await tebeen({ action: 'deactivateMosque', id: 'M001' })).ok, 'deactivate Tebeen mosque');
+      assert(await readMay() === before, 'May data and publication unchanged after all Tebeen writes');
+      assert((await tebeen({ action: 'listMosques' }, 'unknown')).error.code === 'BAD_REQUEST', 'invalid region rejected');
+      const worker = (await import('../src/index.js')).default;
+      const unavailable = await worker.fetch(new Request(`${BASE_URL}/?region=tebeen`), { DB: {} }, {});
+      assert((await unavailable.json()).error.code === 'REGION_UNAVAILABLE', 'missing Tebeen binding never falls back to May');
+    }),
+
     test('Scenario 14: roles and user management', async () => {
       const ipHeaders = { 'CF-Connecting-IP': '198.51.100.140' };
       const loginAs = async (username, password) => {
@@ -980,6 +1028,205 @@ function getNextFriday(now = new Date()) {
       const cAfter = await api({ action: 'whoami', token: coord.token });
       assert(cAfter.error?.code === 'UNAUTHENTICATED', 'reset kills existing sessions');
       await loginAs('coord1', 'freshpass99');
+    }),
+    test('User regions: create/edit, direct API denial, existing sessions and per-region admin protection', async () => {
+      const call = async (region, payload) => fetch(`${BASE_URL}/?region=${region}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+      }).then(r => r.json());
+      const login = async username => {
+        const r = await call('15may', { action: 'login', username, password: 'regionpass123' });
+        assert(r.ok, 'regional user can sign in even from the other login page');
+        return r.data;
+      };
+      for (const regionAccess of ['', null, 'unknown', ['both'], true]) {
+        const r = await api({ action: 'createUser', token, username: 'badregion', displayName: 'تجربة', role: 'viewer', password: 'regionpass123', regionAccess });
+        assert(r.error?.code === 'BAD_REQUEST', 'invalid region access rejected');
+      }
+      for (const [username, regionAccess, role] of [['rmay', '15may', 'coordinator'], ['rteb', 'tebeen', 'viewer'], ['rboth', 'both', 'coordinator'], ['radmin', 'tebeen', 'admin']]) {
+        const r = await api({ action: 'createUser', token, username, regionAccess, role, displayName: username, password: 'regionpass123' });
+        assert(r.ok, `create ${regionAccess} account`);
+        const u = await login(username);
+        assert(u.regionAccess === regionAccess, 'login returns assigned region');
+        const me = await call('15may', { action: 'whoami', token: u.token });
+        assert(me.data.regionAccess === regionAccess, 'whoami carries live region scope');
+        for (const region of ['15may', 'tebeen']) {
+          const read = await call(region, { action: 'listMosques', token: u.token });
+          assert(regionAccess === 'both' || regionAccess === region ? read.ok : read.error?.code === 'REGION_FORBIDDEN', 'direct API region access enforced');
+        }
+      }
+      const mayUser = await login('rmay');
+      for (const action of ['listMosques', 'listKhatibs', 'getSchedule', 'getKhatibSchedule', 'getScheduleHistory', 'getSettings', 'getLoadCounts', 'listDates', 'createMosque', 'updateMosque', 'reorderMosque', 'deactivateMosque', 'createKhatib', 'updateKhatib', 'deactivateKhatib', 'setPreferences', 'generateDate', 'regenerateDate', 'saveSchedule', 'publishRange', 'listUsers', 'createUser', 'updateUser', 'resetUserPassword', 'futureAction']) {
+        const r = await call('tebeen', { action, token: mayUser.token, regionAccess: 'both', region: '15may' });
+        assert(r.error?.code === 'REGION_FORBIDDEN', `region block precedes payload execution: ${action}`);
+      }
+      const viewer = await login('rteb');
+      assert((await call('tebeen', { action: 'generateDate', token: viewer.token, date: fridayDate })).error?.code === 'FORBIDDEN', 'region scope never grants a stronger role');
+      const both = await login('rboth');
+      const narrow = await api({ action: 'updateUser', token, username: 'rboth', displayName: 'rboth', role: 'coordinator', active: true, regionAccess: 'tebeen' });
+      assert(narrow.ok, 'admin can change region');
+      assert((await call('15may', { action: 'listMosques', token: both.token })).error?.code === 'REGION_FORBIDDEN', 'old token loses revoked region immediately');
+      assert((await call('tebeen', { action: 'listMosques', token: both.token })).ok, 'same token keeps allowed region');
+      const omitted = await api({ action: 'updateUser', token, username: 'rboth', displayName: 'rboth', role: 'coordinator', active: true });
+      assert(omitted.ok, 'legacy update preserves region');
+      assert((await api({ action: 'whoami', token: both.token })).data.regionAccess === 'tebeen', 'omitted scope does not broaden access');
+      const invalidEdit = await api({ action: 'updateUser', token, username: 'rboth', displayName: 'rboth', role: 'coordinator', active: true, regionAccess: '' });
+      assert(invalidEdit.error?.code === 'BAD_REQUEST', 'invalid edit region rejected');
+      const list = await api({ action: 'listUsers', token });
+      assert(list.data.users.find(u => u.username === 'rboth').regionAccess === 'tebeen', 'user list exposes region');
+      const admin = await login('radmin');
+      const self = await call('tebeen', { action: 'updateUser', token: admin.token, username: 'radmin', displayName: 'radmin', role: 'admin', active: true, regionAccess: 'both' });
+      assert(self.error?.code === 'BAD_REQUEST', 'admin cannot broaden their own region');
+      const split = await call('tebeen', { action: 'updateUser', token: admin.token, username: 'testadmin', displayName: 'أدمن التجربة', role: 'admin', active: true, regionAccess: '15may' });
+      assert(split.ok, 'each region can have its own admin');
+      const last = await api({ action: 'updateUser', token, username: 'radmin', displayName: 'radmin', role: 'viewer', active: true, regionAccess: 'tebeen' });
+      assert(last.error?.code === 'BAD_REQUEST', 'last admin of a region cannot be removed');
+      const restore = await call('tebeen', { action: 'updateUser', token: admin.token, username: 'testadmin', displayName: 'أدمن التجربة', role: 'admin', active: true, regionAccess: 'both' });
+      assert(restore.ok, 'restore both-region admin');
+    }),
+    test('Scenario Khatib Portal: phone login, attendance confirmation, excuse, readiness, and schedule reflection', async () => {
+      // 0. Ensure K001 and K002 are active and K001 is assigned to M001 on fridayDate
+      await api({ action: 'updateKhatib', token, id: 'K001', name: 'أحمد علي', phone: '01011111111', type: 'primary', active: true });
+      await api({ action: 'updateKhatib', token, id: 'K002', name: 'محمد حسن', phone: '01022222222', type: 'primary', active: true });
+      await api({ action: 'updateMosque', token, id: 'M001', name: 'مسجد النور', mujawra: 'مجاورة 1', active: true });
+      const curSched = await api({ action: 'getSchedule', token, date: fridayDate });
+      await api({
+        action: 'saveSchedule',
+        token,
+        date: fridayDate,
+        version: curSched.data.version,
+        changes: [
+          { mosqueId: 'M001', khatibId: 'K001', status: 'unassigned' },
+          { mosqueId: 'M002', khatibId: '', status: 'unassigned' },
+          { mosqueId: 'M003', khatibId: '', status: 'unassigned' }
+        ]
+      });
+
+      // 1. Phone validation & error handling
+      const badPhone = await api({ action: 'khatibLogin', phone: '123' });
+      assert(badPhone.error?.code === 'BAD_REQUEST', 'short phone rejected');
+
+      const unknownPhone = await api({ action: 'khatibLogin', phone: '01099999999' });
+      assert(unknownPhone.error?.code === 'NOT_FOUND', 'unregistered phone returns NOT_FOUND');
+
+      // 2. Successful login for K001 (assigned as permanent khatib of M001)
+      const k1 = await api({ action: 'khatibLogin', phone: '01011111111' });
+      assert(k1.ok, 'khatib 1 login ok');
+      assert(k1.data.token && k1.data.khatib.id === 'K001', 'token and khatib id returned');
+
+      // 3. khatibWhoami
+      const who = await api({ action: 'khatibWhoami', token: k1.data.token });
+      assert(who.ok && who.data.khatib.name === 'أحمد علي', 'khatibWhoami returns khatib name');
+
+      // 4. khatibGetSchedule for K001 on fridayDate (which was generated in earlier test)
+      const sched1 = await api({ action: 'khatibGetSchedule', token: k1.data.token, date: fridayDate });
+      assert(sched1.ok, 'khatibGetSchedule ok');
+      assert(sched1.data.hasAssignment === true, 'K001 has assignment at M001');
+      assert(sched1.data.assignment.mosqueName === 'مسجد النور', 'mosque name is مسجد النور');
+      assert(sched1.data.availableDates.length === 1 && sched1.data.availableDates[0] === fridayDate, 'only current sermon is available');
+
+      // Reject direct requests for past/future sermons, for both response types.
+      const beforeRejected = await api({ action: 'getSchedule', token, date: pastDate });
+      for (const closedDate of [pastDate, datePlus7, addDays(fridayDate, 1)]) {
+        const closedRead = await api({ action: 'khatibGetSchedule', token: k1.data.token, date: closedDate });
+        assert(closedRead.error?.code === 'SERMON_CLOSED', 'non-current sermon cannot be opened');
+        for (const responseType of ['assignment', 'readiness']) {
+          const closedWrite = await api({ action: 'khatibRespond', token: k1.data.token, date: closedDate, responseType, status: 'excused' });
+          assert(closedWrite.error?.code === 'SERMON_CLOSED', 'non-current sermon cannot be changed');
+        }
+      }
+      const afterRejected = await api({ action: 'getSchedule', token, date: pastDate });
+      assert(JSON.stringify(beforeRejected.data) === JSON.stringify(afterRejected.data), 'rejected requests preserve historical data');
+      const crossRegion = await fetch(`${BASE_URL}/?region=tebeen`, {
+        method: 'POST', headers: { 'Content-Type': 'text/plain' },
+        body: JSON.stringify({ action: 'khatibWhoami', token: k1.data.token })
+      }).then(r => r.json());
+      assert(crossRegion.error?.code === 'UNAUTHENTICATED', 'May khatib session cannot access Tebeen');
+
+      // 5. K001 excuses attendance (اعتذار)
+      const excuseRes = await api({
+        action: 'khatibRespond',
+        token: k1.data.token,
+        date: fridayDate,
+        responseType: 'assignment',
+        status: 'excused'
+      });
+      assert(excuseRes.ok && excuseRes.data.status === 'excused', 'K001 excused ok');
+
+      // Verify that getSchedule returns status === 'excused' for M001
+      const mainSchedAfterExcuse = await api({ action: 'getSchedule', token, date: fridayDate });
+      const m1Row = mainSchedAfterExcuse.data.rows.find(r => r.mosqueId === 'M001');
+      assert(m1Row.status === 'excused', 'assignment status is excused in main schedule');
+
+      // 6. K001 re-confirms attendance (تأكيد الحضور)
+      const confirmRes = await api({
+        action: 'khatibRespond',
+        token: k1.data.token,
+        date: fridayDate,
+        responseType: 'assignment',
+        status: 'confirmed'
+      });
+      assert(confirmRes.ok && confirmRes.data.status === 'confirmed', 'K001 confirmed ok');
+      const mainSchedAfterConfirm = await api({ action: 'getSchedule', token, date: fridayDate });
+      const m1Row2 = mainSchedAfterConfirm.data.rows.find(r => r.mosqueId === 'M001');
+      assert(m1Row2.status === 'confirmed', 'assignment status is confirmed in main schedule');
+
+      // 7. Login for K002 (محمد حسن - not assigned to any mosque on fridayDate)
+      const k2 = await api({ action: 'khatibLogin', phone: '01022222222' });
+      assert(k2.ok, 'khatib 2 login ok');
+      const sched2 = await api({ action: 'khatibGetSchedule', token: k2.data.token, date: fridayDate });
+      assert(sched2.ok, 'khatib 2 schedule ok');
+      assert(sched2.data.hasAssignment === false, 'K002 has no assignment on fridayDate');
+      assert(sched2.data.readiness === 'undecided', 'initial readiness is undecided');
+
+      // 8. K002 marks readiness as 'ready' (مستعد للخطابة)
+      const readyRes = await api({
+        action: 'khatibRespond',
+        token: k2.data.token,
+        date: fridayDate,
+        responseType: 'readiness',
+        status: 'ready'
+      });
+      assert(readyRes.ok && readyRes.data.status === 'ready', 'readiness marked ready');
+
+      // 9. Verify getSchedule returns K002 as ready in khatibReadiness map
+      const mainSchedWithReadiness = await api({ action: 'getSchedule', token, date: fridayDate });
+      assert(mainSchedWithReadiness.data.khatibReadiness['K002'] === 'ready', 'khatibReadiness exposes K002 as ready');
+
+      // 10. K002 changes mind to 'excused' (معتذر عن هذه الجمعة)
+      const excusedReadinessRes = await api({
+        action: 'khatibRespond',
+        token: k2.data.token,
+        date: fridayDate,
+        responseType: 'readiness',
+        status: 'excused'
+      });
+      assert(excusedReadinessRes.ok && excusedReadinessRes.data.status === 'excused', 'readiness updated to excused');
+      const mainSchedExcused = await api({ action: 'getSchedule', token, date: fridayDate });
+      assert(mainSchedExcused.data.khatibReadiness['K002'] === 'excused', 'khatibReadiness reflects excused');
+    }),
+    test('New assignments await confirmation; regeneration and omitted statuses preserve intent', async () => {
+      const date = addDays(fridayDate, 35);
+      assert((await api({ action: 'updateMosque', token, id: 'M001', name: 'مسجد النور', mujawra: 'مجاورة 1', active: true, permanentKhatibId: 'K001' })).ok, 'set permanent khatib for test');
+      const gen = await api({ action: 'generateDate', token, date });
+      assert(gen.ok && gen.data.rows.find(r => r.mosqueId === 'M001').status === 'unassigned', 'generated permanent assignment awaits confirmation');
+      const saved = await api({ action: 'saveSchedule', token, date, changes: [{ mosqueId: 'M001', khatibId: 'K002' }] });
+      assert(saved.ok && saved.data.rows.find(r => r.mosqueId === 'M001').status === 'unassigned', 'API assignment without status awaits confirmation');
+      const confirmed = await api({ action: 'saveSchedule', token, date, changes: [{ mosqueId: 'M001', status: 'confirmed' }] });
+      assert(confirmed.ok, 'explicit confirmation accepted');
+      const preserved = await api({ action: 'saveSchedule', token, date, changes: [{ mosqueId: 'M001', khatibId: 'K002' }] });
+      assert(preserved.data.rows.find(r => r.mosqueId === 'M001').status === 'confirmed', 'unchanged khatib preserves confirmation');
+      const replaced = await api({ action: 'saveSchedule', token, date, changes: [{ mosqueId: 'M001', khatibId: 'K001' }] });
+      assert(replaced.data.rows.find(r => r.mosqueId === 'M001').status === 'unassigned', 'replacement resets confirmation');
+      const reset = await api({ action: 'regenerateDate', token, date, mode: 'reset' });
+      assert(reset.ok && reset.data.rows.every(r => r.status === 'unassigned'), 'reset fills permanent khatibs without confirming them');
+      await api({ action: 'saveSchedule', token, date, changes: [{ mosqueId: 'M001', khatibId: '' }] });
+      const fill = await api({ action: 'regenerateDate', token, date, mode: 'fill' });
+      assert(fill.ok && fill.data.rows.find(r => r.mosqueId === 'M001').khatibId === 'K001' && fill.data.rows.find(r => r.mosqueId === 'M001').status === 'unassigned', 'fill restores permanent khatib as pending');
+      const created = await api({ action: 'createMosque', token, name: 'مسجد اختبار انتظار التأكيد', mujawra: 'اختبار', permanentKhatibId: 'K002' });
+      assert(created.ok, 'new permanent mosque created');
+      const added = await api({ action: 'regenerateDate', token, date, mode: 'fill' });
+      const addedRow = added.data.rows.find(r => r.khatibId === 'K002');
+      assert(added.ok && addedRow && addedRow.status === 'unassigned', 'new mosque added during regeneration awaits confirmation');
     }),
   ];
 

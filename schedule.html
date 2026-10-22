@@ -20,6 +20,9 @@
     .row-select { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; font-family: inherit; font-size: .9em; background: #fff; }
     .row-select:focus { border-color: var(--blue); outline: none; }
     .row-select.conflict { border-color: var(--err); background: #fef2f2; }
+    .sched .table-row.excused-row { background: #fef2f2; border-right: 4px solid #dc2626; }
+    .sched .excused-row [data-label="الخطيب"], .sched .excused-row [data-status] { color: #b91c1c; font-weight: 700; }
+    .sched .excused-row .khatib-trigger, .sched .excused-row [data-status] { border-color: #fca5a5; background: #fff1f2; }
     .khatib-trigger {
       text-align: right;
       cursor: pointer;
@@ -123,12 +126,14 @@
       loadCount: {},     // khatibId -> عدد الخطب في الفترة القادمة
       dirty: {},         // mosqueId -> { khatibId, status }
       filterEmpty: false,
+      statusFilter: '',
       search: '',
       conflictMosques: [],
       refPromise: null,  // تحميل المساجد والخطباء — الجدول مايترسمش قبله
       histFrom: '',      // من أي تاريخ نعرض الخطب السابقة ('' = مخفية)
       history: { dates: [], byMosque: {} }, // mosqueId -> date -> { khatibId, khatib, status }
       staleConflict: null, // تجميد الحفظ التلقائي عند حدوث STALE_WRITE لحد ما المستخدم يختار
+      khatibReadiness: {}, // جاهزية الخطباء غير المكلفين (ready, excused, undecided)
     };
 
     var _autosaveTimer = null;
@@ -138,7 +143,7 @@
     var _saveStatusState = { status: 'idle', reason: '' };
     var AUTOSAVE_DELAY = 700;
 
-    try { state.histFrom = sessionStorage.getItem('awqaf_hist_from') || ''; } catch (e) {}
+    try { state.histFrom = sessionStorage.getItem('awqaf_hist_from_' + REGION_ID) || ''; } catch (e) {}
     el('histFrom').value = state.histFrom;
 
     (async function () {
@@ -278,6 +283,7 @@
         var d = results[0];
         state.version = d.version;
         state.rows = d.rows;
+        state.khatibReadiness = d.khatibReadiness || {};
 
         if (!d.exists) { renderGenerate(); appReady(); return; }
         render();
@@ -324,8 +330,8 @@
       el('histFrom').value = state.histFrom;
       el('histClear').style.display = state.histFrom ? '' : 'none';
       try {
-        if (state.histFrom) sessionStorage.setItem('awqaf_hist_from', state.histFrom);
-        else sessionStorage.removeItem('awqaf_hist_from');
+        if (state.histFrom) sessionStorage.setItem('awqaf_hist_from_' + REGION_ID, state.histFrom);
+        else sessionStorage.removeItem('awqaf_hist_from_' + REGION_ID);
       } catch (e) {}
       if (!state.date || !state.rows.length) return;
       // إعادة رسم بس — التعديلات اللي لسه متحفظتش بتفضل زي ما هي
@@ -431,6 +437,11 @@
           '<button class="btn btn-sm" id="emptyBtn"></button>' +
           '<button type="button" class="btn btn-plain btn-sm" id="freeKhatibsBtn"></button>' +
           '<button class="btn btn-plain btn-sm" id="allBtn" style="display:none">عرض الكل</button>' +
+          '<label for="statusFilter" style="margin:0">الحالة</label>' +
+          '<select id="statusFilter" class="row-select" style="width:auto">' +
+            '<option value="">كل الحالات</option><option value="pending">لم يتم التأكيد</option>' +
+            '<option value="confirmed">مؤكد</option><option value="excused">معتذر</option>' +
+            '<option value="empty">بدون خطيب</option></select>' +
           '<span style="flex:1"></span>' +
           (canEdit() ? '<button class="btn btn-sm btn-plain" id="regenBtn" title="يضيف المساجد الجديدة ويملّي الفاضي بالخطيب الثابت">🔄 إعادة التوليد</button>' : '') +
           '<button class="btn btn-sm btn-plain" id="pdfBtn">📄 استخراج PDF</button>' +
@@ -445,6 +456,7 @@
           '<div id="noResults" class="state" style="display:none"><p>لا توجد نتائج</p></div>' +
         '</div>';
 
+      el('statusFilter').value = state.statusFilter;
       updateStickyBar();
       applyFilters();
       wire();
@@ -469,7 +481,7 @@
           var confirmedKhatibIds = new Set();
           state.rows.forEach(function (r) {
             var eff = effective(r);
-            if (eff.khatibId && eff.status === 'confirmed') {
+            if (eff.khatibId && eff.status !== 'excused') {
               confirmedKhatibIds.add(String(eff.khatibId));
             }
           });
@@ -483,7 +495,7 @@
 
       var allBtn = el('allBtn');
       if (allBtn) {
-        allBtn.style.display = state.filterEmpty ? 'inline-block' : 'none';
+        allBtn.style.display = (state.filterEmpty || state.statusFilter || state.search) ? 'inline-block' : 'none';
       }
 
       renderSaveStatus();
@@ -509,7 +521,7 @@
           matchesSearch = matches(m.name || r.mosque, query) || matches(m.mujawra || r.mujawra, query);
         }
 
-        var isVisible = matchesEmpty && matchesSearch;
+        var isVisible = matchesEmpty && matchesSearch && matchesStatusFilter(eff);
         rowEl.style.display = isVisible ? '' : 'none';
         if (isVisible) visibleCount++;
       });
@@ -522,6 +534,14 @@
       if (tableHeader) {
         tableHeader.style.display = visibleCount === 0 ? 'none' : ''; // '' عشان الموبايل يخفيه من الـ CSS
       }
+    }
+
+    function matchesStatusFilter(eff) {
+      if (!state.statusFilter) return true;
+      if (state.statusFilter === 'empty') return !eff.khatibId;
+      if (!eff.khatibId) return false;
+      if (state.statusFilter === 'pending') return eff.status === 'unassigned';
+      return eff.status === state.statusFilter;
     }
 
     function tableHtml(rows) {
@@ -545,7 +565,7 @@
     function rowHtml(r) {
       var m = state.mosques[r.mosqueId] || state.mosques[String(r.mosqueId)] || {};
       var e = effective(r);
-      var cls = 'table-row' + (state.dirty[r.mosqueId] || state.dirty[String(r.mosqueId)] ? ' dirty' : '') + (!e.khatibId ? ' empty-slot' : '');
+      var cls = 'table-row' + (state.dirty[r.mosqueId] || state.dirty[String(r.mosqueId)] ? ' dirty' : '') + (!e.khatibId ? ' empty-slot' : '') + (e.status === 'excused' ? ' excused-row' : '');
       return '<div class="' + cls + '" data-mosque="' + esc(r.mosqueId) + '">' +
         '<div data-label="رقم المسجد"><span class="mosque-no">' + esc(mosqueNo(r)) + '</span></div>' +
         '<div data-label="المسجد">' + esc(m.name || r.mosque) + '</div>' +
@@ -593,10 +613,11 @@
       if (!e.khatibId) return '<span class="badge badge-off">شاغر</span>';
       if (!canEdit()) {
         var isConfirmed = (e.status === 'confirmed');
-        return '<span class="badge ' + (isConfirmed ? 'badge-volunteer' : 'badge-warn') + '">' +
-          (isConfirmed ? 'مؤكد' : 'معتذر') + '</span>';
+        return '<span class="badge ' + (isConfirmed ? 'badge-volunteer' : e.status === 'excused' ? 'badge-excused' : 'badge-off') + '">' +
+          (isConfirmed ? 'مؤكد' : e.status === 'excused' ? 'معتذر' : 'لم يتم التأكيد') + '</span>';
       }
       return '<select class="row-select" data-status="' + esc(r.mosqueId) + '">' +
+        '<option value="unassigned"' + (e.status === 'unassigned' ? ' selected' : '') + '>لم يتم التأكيد</option>' +
         '<option value="confirmed"' + (e.status === 'confirmed' ? ' selected' : '') + '>مؤكد</option>' +
         '<option value="excused"' + (e.status === 'excused' ? ' selected' : '') + '>معتذر</option>' +
         '</select>';
@@ -612,7 +633,7 @@
       var isDirty = !!(state.dirty[r.mosqueId] || state.dirty[String(r.mosqueId)]);
       var isEmpty = !e.khatibId;
 
-      rowEl.className = 'table-row' + (isDirty ? ' dirty' : '') + (isEmpty ? ' empty-slot' : '');
+      rowEl.className = 'table-row' + (isDirty ? ' dirty' : '') + (isEmpty ? ' empty-slot' : '') + (e.status === 'excused' ? ' excused-row' : '');
 
       if (String(mosqueId) !== String(activeMosqueId)) {
         var khatibCell = rowEl.querySelector('[data-label="الخطيب"]');
@@ -645,20 +666,40 @@
         var count = state.loadCount[kIdStr] || state.loadCount[k.id] || 0;
         var labelCount = count ? ' (' + count + ')' : '';
 
+        // حالة الجاهزية المسجلة من الخطيب نفسه
+        var readiness = (state.khatibReadiness && state.khatibReadiness[kIdStr]) || '';
+        var readinessBadge = '';
+        if (readiness === 'ready') {
+          readinessBadge = ' [🟢 مستعد]';
+        } else if (readiness === 'excused') {
+          readinessBadge = ' [🚫 معتذر]';
+        } else if (readiness === 'undecided') {
+          readinessBadge = ' [⚪ لم يحدد]';
+        }
+
         if (where) {
           var wm = state.mosques[where] || state.mosques[String(where)] || {};
           var mosqueName = wm.name || ('مسجد ' + where);
           groups[3].push({
             id: kIdStr,
-            label: k.name + labelCount + ' — ⚠️ مسند إلى: ' + mosqueName
+            label: k.name + labelCount + readinessBadge + ' — ⚠️ مسند إلى: ' + mosqueName
           });
         } else if (kIdStr && kIdStr === permanent) {
-          groups[0].push({ id: kIdStr, label: '★ ' + k.name + labelCount + ' — خطيب ثابت' });
+          groups[0].push({ id: kIdStr, label: '★ ' + k.name + labelCount + readinessBadge + ' — خطيب ثابت' });
         } else if ((state.prefsByKhatib[kIdStr] || state.prefsByKhatib[k.id] || new Set()).has(String(r.mosqueId))) {
-          groups[1].push({ id: kIdStr, label: '♦ ' + k.name + labelCount + ' — (مستهدف/مقترح)' });
+          groups[1].push({ id: kIdStr, label: '♦ ' + k.name + labelCount + readinessBadge + ' — (مستهدف/مقترح)' });
         } else {
-          groups[2].push({ id: kIdStr, label: k.name + labelCount });
+          groups[2].push({ id: kIdStr, label: k.name + labelCount + readinessBadge, readiness: readiness });
         }
+      });
+
+      // في قائمة المتاحين: المستعد للخطابة يظهر أولاً، ثم من لم يحدد، ثم المعتذر في الأسفل
+      groups[2].sort(function (a, b) {
+        var rank = { ready: 0, '': 1, undecided: 1, excused: 2 };
+        var rA = rank[a.readiness] !== undefined ? rank[a.readiness] : 1;
+        var rB = rank[b.readiness] !== undefined ? rank[b.readiness] : 1;
+        if (rA !== rB) return rA - rB;
+        return (a.label || '').localeCompare(b.label || '', 'ar');
       });
 
       var opts = '<option value="">— اختر خطيب —</option>';
@@ -696,6 +737,77 @@
       }
 
       return opts;
+    }
+
+    function khatibMatchesFilters(khatibId, mosqueId, filters) {
+      var id = String(khatibId || '');
+      // يظل إلغاء الإسناد متاحًا مع أي فلتر.
+      if (!id) return true;
+      var readiness = state.khatibReadiness[id] || '';
+      var assignedElsewhere = false;
+      var excused = readiness === 'excused';
+      state.rows.forEach(function (row) {
+        var eff = effective(row);
+        if (String(eff.khatibId || '') !== id) return;
+        if (eff.status === 'excused') excused = true;
+        if (String(row.mosqueId) !== String(mosqueId)) assignedElsewhere = true;
+      });
+      if (filters.status === 'excused' && !excused) return false;
+      if (filters.status === 'not-excused' && excused) return false;
+      if (filters.status === 'ready' && (readiness !== 'ready' || excused)) return false;
+      var prefs = state.prefsByKhatib[id] || new Set();
+      if (filters.preferred && !prefs.has(String(mosqueId))) return false;
+      if (filters.available && assignedElsewhere) return false;
+      return true;
+    }
+
+    function attachKhatibFilters(ts, row) {
+      // الفلاتر خاصة بالقائمة المفتوحة، ولا تغيّر قيمة الإسناد أو البحث المكتوب.
+      var filters = { status: '', preferred: false, available: false };
+      var search = ts.search;
+      ts.search = function (query) {
+        var result = search.call(this, query);
+        var items = result.items.filter(function (item) {
+          return khatibMatchesFilters(item.id, row.mosqueId, filters);
+        });
+        return Object.assign({}, result, { items: items, total: items.length });
+      };
+
+      var bar = document.createElement('div');
+      bar.className = 'khatib-filters';
+      bar.setAttribute('role', 'group');
+      bar.setAttribute('aria-label', 'تصفية قائمة الخطباء');
+      bar.innerHTML = '<div class="khatib-filter-row">' +
+        '<button type="button" data-khatib-status="" aria-pressed="true">الكل</button>' +
+        '<button type="button" data-khatib-status="excused" aria-pressed="false">معتذر</button>' +
+        '<button type="button" data-khatib-status="not-excused" aria-pressed="false">غير معتذر</button>' +
+        '<button type="button" data-khatib-status="ready" aria-pressed="false">مستعد</button></div>' +
+        '<div class="khatib-filter-row">' +
+        '<button type="button" data-khatib-toggle="preferred" aria-pressed="false">المسجد من تفضيلاته</button>' +
+        '<button type="button" data-khatib-toggle="available" aria-pressed="false">غير مسند لمسجد آخر</button></div>';
+      ts.dropdown.insertBefore(bar, ts.dropdown_content);
+      bar.addEventListener('mousedown', function (event) { event.preventDefault(); });
+      bar.addEventListener('click', function (event) {
+        var button = event.target.closest('button');
+        if (!button) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (button.hasAttribute('data-khatib-status')) {
+          filters.status = button.dataset.khatibStatus;
+          if (!filters.status) { filters.preferred = false; filters.available = false; }
+        } else {
+          var key = button.dataset.khatibToggle;
+          filters[key] = !filters[key];
+        }
+        bar.querySelectorAll('button').forEach(function (btn) {
+          var pressed = btn.hasAttribute('data-khatib-status')
+            ? btn.dataset.khatibStatus === filters.status
+            : filters[btn.dataset.khatibToggle];
+          btn.setAttribute('aria-pressed', String(!!pressed));
+        });
+        ts.refreshOptions(false);
+        ts.positionDropdown();
+      });
     }
 
     function openKhatibDropdown(mosqueId) {
@@ -793,6 +905,8 @@
         }
       });
 
+      attachKhatibFilters(activeTomSelect, r);
+
       activeTomSelect.on('dropdown_close', function () {
         setTimeout(function () {
           if (activeMosqueId === String(mosqueId)) {
@@ -828,7 +942,7 @@
         }
       }
 
-      state.dirty[mosqueId] = { khatibId: val, status: val ? (cur.status === 'excused' ? 'excused' : 'confirmed') : 'unassigned' };
+      state.dirty[mosqueId] = { khatibId: val, status: val && String(val) === String(cur.khatibId) ? cur.status : 'unassigned' };
       if (state.dirty[mosqueId].khatibId === row.khatibId && state.dirty[mosqueId].status === row.status) {
         delete state.dirty[mosqueId];
       }
@@ -850,9 +964,7 @@
       setTimeout(function () {
         destroyActiveTomSelect();
         updateStickyBar();
-        if (state.filterEmpty) {
-          applyFilters();
-        }
+        applyFilters();
       }, 0);
     }
 
@@ -866,6 +978,7 @@
       }
       updateRow(mosqueId);
       updateStickyBar();
+      applyFilters();
 
       if (Object.keys(state.dirty).length === 0) {
         if (_autosaveTimer) {
@@ -892,11 +1005,7 @@
         if (e.khatibId) {
           var k = state.khatibs.find(function (x) { return String(x.id) === String(e.khatibId); });
           var name = k ? k.name : (r.khatib || 'خطيب ' + e.khatibId);
-          if (e.status === 'excused') {
-            khatibText = name + ' (معتذر)';
-          } else {
-            khatibText = name;
-          }
+          khatibText = name;
         }
         return [mosqueName, mujawra, khatibText];
       });
@@ -906,6 +1015,14 @@
     function wire() {
       el('emptyBtn').onclick = function () {
         state.filterEmpty = !state.filterEmpty;
+        state.statusFilter = '';
+        el('statusFilter').value = '';
+        updateStickyBar();
+        applyFilters();
+      };
+      el('statusFilter').onchange = function () {
+        state.statusFilter = this.value;
+        state.filterEmpty = false;
         updateStickyBar();
         applyFilters();
       };
@@ -920,6 +1037,10 @@
       if (ab) {
         ab.onclick = function () {
           state.filterEmpty = false;
+          state.statusFilter = '';
+          state.search = '';
+          el('statusFilter').value = '';
+          el('mosqueSearch').value = '';
           updateStickyBar();
           applyFilters();
         };
@@ -941,6 +1062,7 @@
       var s = el('mosqueSearch');
       s.oninput = function () {
         state.search = this.value;
+        updateStickyBar();
         applyFilters();
       };
     }
@@ -1205,9 +1327,7 @@
           updateRow(mId);
         });
         updateStickyBar();
-        if (state.filterEmpty) {
-          applyFilters();
-        }
+        applyFilters();
 
         // 6. تحديث عدد الخطب في الخلفية بدون تعطيل
         refreshLoadCounts();

@@ -199,8 +199,12 @@ complete desired state, and a replace cannot drift out of sync the way increment
 ```
 
 Creates one `assignments` row for every active mosque. A mosque with a `permanent_khatib_id`
-is pre-filled with it and marked `confirmed`; every other mosque gets an empty `khatib_id`
-and `unassigned`.
+is pre-filled with it and marked `unassigned` (awaiting confirmation); every other mosque
+gets an empty `khatib_id` and `unassigned` (vacant). New permanent assignments inserted or
+filled by `regenerateDate` also await confirmation. Existing rows retain their status.
+
+When `saveSchedule` omits `status`, a different khatib starts as `unassigned`; the same
+khatib retains the existing status. Explicit confirmation and excuse remain supported.
 
 **This action takes the same script lock as `saveSchedule`, and the existence check happens
 inside it.** Without the lock, two admins clicking `توليد الجمعة` at the same moment both read

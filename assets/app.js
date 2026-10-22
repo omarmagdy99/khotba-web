@@ -28,9 +28,16 @@ function clearClientCache() {
  */
 async function api(action, payload) {
   var isCacheable = _CACHEABLE_ACTIONS.indexOf(action) >= 0;
-  var cacheKey = 'awqaf_cache_' + action + '_' + JSON.stringify(payload || {});
+  var cacheKey = 'awqaf_cache_' + REGION_ID + '_' + getToken() + '_' + action + '_' + JSON.stringify(payload || {});
 
   if (isCacheable) {
+    // Check current server permissions before reusing protected data from an earlier page.
+    var identity = await api('whoami');
+    if (!canAccessRegion(identity.regionAccess, REGION_ID)) {
+      clearClientCache();
+      goAllowedRegion(identity.regionAccess);
+      throw new ApiError('REGION_FORBIDDEN', 'حسابك غير مسموح له بدخول هذه المنطقة');
+    }
     try {
       var cachedStr = sessionStorage.getItem(cacheKey);
       if (cachedStr) {
@@ -62,7 +69,11 @@ async function api(action, payload) {
   }
 
   if (!json.ok) {
-    if (json.error.code === 'UNAUTHENTICATED') { clearToken(); goLogin(); }
+    if (json.error.code === 'UNAUTHENTICATED' && action.indexOf('khatib') !== 0) { clearToken(); goLogin(); }
+    if (json.error.code === 'REGION_FORBIDDEN') {
+      clearClientCache();
+      goAllowedRegion(json.error.details.regionAccess);
+    }
     throw new ApiError(json.error.code, json.error.message, json.error.details);
   }
 
@@ -76,10 +87,15 @@ async function api(action, payload) {
     clearClientCache();
   }
 
-  if (action === 'login' && json.data) {
+  if ((action === 'login' || action === 'whoami') && json.data) {
     if (json.data.role) localStorage.setItem('awqaf_role', json.data.role);
     if (json.data.displayName) localStorage.setItem('awqaf_name', json.data.displayName);
     if (json.data.username) localStorage.setItem('awqaf_username', json.data.username);
+    if (json.data.regionAccess) {
+      if (localStorage.getItem('awqaf_region_access') !== json.data.regionAccess) clearClientCache();
+      localStorage.setItem('awqaf_region_access', json.data.regionAccess);
+      updateRegionSwitch();
+    }
   }
 
   return json.data;
@@ -100,6 +116,7 @@ function clearToken() {
   localStorage.removeItem('awqaf_name');
   localStorage.removeItem('awqaf_username');
   localStorage.removeItem('awqaf_role');
+  localStorage.removeItem('awqaf_region_access');
 }
 function getUserName() { return localStorage.getItem('awqaf_name') || ''; }
 function getUsername() { return localStorage.getItem('awqaf_username') || ''; }
@@ -110,6 +127,55 @@ function setRole(r) {
 }
 function isAdmin() { return getRole() === 'admin'; }
 function canEdit() { return isAdmin() || getRole() === 'coordinator'; }
+
+function canAccessRegion(access, region) { return access === 'both' || access === region; }
+function goAllowedRegion(access) {
+  var region = canAccessRegion(access, REGION_ID) ? REGION_ID : access === 'tebeen' ? 'tebeen' : '15may';
+  location.href = regionPageUrl(region, 'schedule.html');
+}
+function updateRegionSwitch() {
+  var link = document.getElementById('regionSwitch');
+  if (!link) return;
+  var other = REGION_ID === 'tebeen' ? '15may' : 'tebeen';
+  link.hidden = !!getToken() && !canAccessRegion(localStorage.getItem('awqaf_region_access'), other);
+}
+
+function regionPageUrl(region, page) {
+  var base = new URL(REGION_ID === 'tebeen' ? '../' : './', location.href);
+  // صفحات التبين متولدة داخل dist؛ الملف الأصلي قد يُفتح مباشرة من الجهاز.
+  if (location.protocol === 'file:' && !FRONTEND_BUILD) base = new URL('dist/', base);
+  return new URL((region === 'tebeen' ? 'tebeen/' : '') + page, base).href;
+}
+
+// اسم المنطقة يظهر للجميع؛ رابط تبديلها لا يظهر في الجداول العامة.
+(function renderRegionBar() {
+  var page = location.pathname.split('/').pop() || 'index.html';
+  if (!/\.html$/.test(page)) page += '.html';
+  var otherRegion = REGION_ID === 'tebeen' ? '15may' : 'tebeen';
+  var bar = document.createElement('div');
+  bar.className = 'region-bar';
+  var label = document.createElement('strong');
+  label.textContent = '🕌 أوقاف ' + REGION_NAME;
+  bar.appendChild(label);
+  if (page === 'public.html' || page === 'khatib-portal.html') {
+    document.body.insertBefore(bar, document.body.firstChild);
+    return;
+  }
+  var link = document.createElement('a');
+  link.id = 'regionSwitch';
+  link.className = 'btn btn-sm btn-plain';
+  link.href = regionPageUrl(otherRegion, page);
+  link.textContent = 'الانتقال إلى ' + (otherRegion === 'tebeen' ? 'التبين' : '15 مايو') + ' ←';
+  link.addEventListener('click', async function (event) {
+    if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    if (typeof flushOrConfirm === 'function' && !await flushOrConfirm()) return;
+    location.href = link.href;
+  });
+  bar.appendChild(link);
+  document.body.insertBefore(bar, document.body.firstChild);
+  updateRegionSwitch();
+})();
 
 function goLogin() {
   // Cloudflare بيقدّم الصفحات من غير .html (‎/index)، فلازم نتعرّف على الشكلين.
@@ -122,10 +188,14 @@ var _currentNavActive = '';
 async function requireAuth() {
   if (!getToken()) { goLogin(); return false; }
   try {
+    var oldRole = getRole();
     var me = await api('whoami');
+    if (!canAccessRegion(me.regionAccess, REGION_ID)) {
+      goAllowedRegion(me.regionAccess);
+      return false;
+    }
     localStorage.setItem('awqaf_name', me.displayName);
     if (me.username) localStorage.setItem('awqaf_username', me.username);
-    var oldRole = getRole();
     if (me.role) {
       localStorage.setItem('awqaf_role', me.role);
     }

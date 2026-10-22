@@ -18,8 +18,10 @@ import {
 } from './schedule.js';
 import { getSettings_ } from './settings.js';
 import { one } from './db.js';
+import { canAccessRegion } from './regions.js';
+import { khatibLogin_, khatibWhoami_, khatibGetSchedule_, khatibRespond_ } from './khatib-portal.js';
 
-const SCRIPT_VERSION = '2026-07-26';
+const SCRIPT_VERSION = '2026-10-21';
 
 const KNOWN_ACTIONS = [
   'login', 'logout', 'whoami', 'changePassword',
@@ -29,6 +31,7 @@ const KNOWN_ACTIONS = [
   'createKhatib', 'updateKhatib', 'deactivateKhatib', 'setPreferences',
   'generateDate', 'regenerateDate', 'saveSchedule', 'publishRange',
   'listUsers', 'createUser', 'updateUser', 'resetUserPassword',
+  'khatibLogin', 'khatibWhoami', 'khatibGetSchedule', 'khatibRespond',
 ];
 
 // أقل صلاحية مطلوبة لكل إجراء. أي إجراء مش مذكور هنا بيتعامل على إنه للمدير بس،
@@ -64,6 +67,15 @@ export default {
 
     try {
       const url = new URL(request.url);
+      const region = url.searchParams.get('region') || '15may';
+      if (!['15may', 'tebeen'].includes(region)) {
+        return jsonResponse(err_('BAD_REQUEST', 'المنطقة غير صحيحة'));
+      }
+      // لا نرجع لقاعدة 15 مايو لو ربط التبين غير متاح.
+      const db = region === 'tebeen' ? env.DB_TEBEEN : env.DB;
+      if (!db || (region === 'tebeen' && db === env.DB)) {
+        return jsonResponse(err_('REGION_UNAVAILABLE', 'بيانات المنطقة غير متاحة حاليًا'));
+      }
 
       // 2. طلبات الـ GET
       if (request.method === 'GET') {
@@ -71,7 +83,7 @@ export default {
         if (url.pathname === '/health' || url.searchParams.get('health')) {
           let dbOk = false;
           try {
-            const check = await one(env.DB, 'SELECT 1 AS alive');
+            const check = await one(db, 'SELECT 1 AS alive');
             dbOk = !!(check && check.alive === 1);
           } catch (e) {
             dbOk = false;
@@ -80,6 +92,7 @@ export default {
             status: dbOk ? 'healthy' : 'degraded',
             db: dbOk,
             version: SCRIPT_VERSION,
+            region,
           }));
         }
 
@@ -93,7 +106,7 @@ export default {
 
         // قراءة الجدول العام
         const date = url.searchParams.get('date') || '';
-        const res = await publicSchedule_(env.DB, date);
+        const res = await publicSchedule_(db, date);
         return jsonResponse(res);
       }
 
@@ -109,7 +122,10 @@ export default {
           }
         }
 
-        const actionResult = await route_(body, env, request);
+        const actionResult = await route_(body, env, request, db, region);
+        if (region === 'tebeen' && actionResult.error) {
+          actionResult.error.message = actionResult.error.message.replace(/المجاورة/g, 'المنطقة');
+        }
         return jsonResponse(actionResult);
       }
 
@@ -121,8 +137,14 @@ export default {
   }
 };
 
-async function route_(b, env, request) {
+async function route_(b, env, request, db, region) {
   const a = b.action;
+
+  // إجراءات بوابة الخطباء (تعتمد على الهاتف والتوكن الخاص بالخطيب بدون صلاحيات لوحة التحكم)
+  if (a === 'khatibLogin') return await khatibLogin_(db, b, request);
+  if (a === 'khatibWhoami') return await khatibWhoami_(db, b);
+  if (a === 'khatibGetSchedule') return await khatibGetSchedule_(db, b);
+  if (a === 'khatibRespond') return await khatibRespond_(db, b);
 
   if (a === 'login') return await login_(env.DB, env, b, request);
   if (a === 'logout') return await logout_(env.DB, b);
@@ -130,6 +152,11 @@ async function route_(b, env, request) {
   const user = await auth_(env.DB, b.token);
   if (!user) {
     return err_('UNAUTHENTICATED', 'انتهت الجلسة، سجّل الدخول من جديد');
+  }
+
+  // Identity/password remain reachable so a valid session can navigate to its allowed region.
+  if (!['whoami', 'changePassword'].includes(a) && !canAccessRegion(user.region_access, region)) {
+    return err_('REGION_FORBIDDEN', 'حسابك غير مسموح له بدخول هذه المنطقة', { regionAccess: user.region_access });
   }
 
   const need = ACTION_ROLE[a] || 'admin';
@@ -140,26 +167,26 @@ async function route_(b, env, request) {
   switch (a) {
     case 'whoami':            return whoami_(user);
     case 'changePassword':    return await changePassword_(env.DB, env, user, b.token, b);
-    case 'listMosques':       return await listMosques_(env.DB, b.includeInactive);
-    case 'listKhatibs':       return await listKhatibs_(env.DB, b.includeInactive);
-    case 'getSchedule':       return await getSchedule_(env.DB, b.date);
-    case 'getKhatibSchedule': return await getKhatibSchedule_(env.DB, b.khatibId, b.from, b.to);
-    case 'getScheduleHistory': return await getScheduleHistory_(env.DB, b.from, b.before);
-    case 'listDates':         return await listDates_(env.DB);
-    case 'getLoadCounts':     return await getLoadCounts_(env.DB, b.from, b.to);
-    case 'createMosque':      return await saveMosque_(env.DB, user, b, true);
-    case 'updateMosque':      return await saveMosque_(env.DB, user, b, false);
-    case 'deactivateMosque':  return await deactivateMosque_(env.DB, user, b.id);
-    case 'reorderMosque':     return await reorderMosque_(env.DB, b);
-    case 'createKhatib':      return await saveKhatib_(env.DB, user, b, true);
-    case 'updateKhatib':      return await saveKhatib_(env.DB, user, b, false);
-    case 'deactivateKhatib':  return await deactivateKhatib_(env.DB, user, b.id);
-    case 'setPreferences':    return await setPreferences_(env.DB, b.khatibId, b.mosqueIds);
-    case 'generateDate':      return await generateDate_(env.DB, user, b);
-    case 'regenerateDate':    return await regenerateDate_(env.DB, user, b);
-    case 'saveSchedule':      return await saveSchedule_(env.DB, user, b);
-    case 'publishRange':      return await publishRange_(env.DB, b);
-    case 'getSettings':       return await getSettings_(env.DB);
+    case 'listMosques':       return await listMosques_(db, b.includeInactive);
+    case 'listKhatibs':       return await listKhatibs_(db, b.includeInactive);
+    case 'getSchedule':       return await getSchedule_(db, b.date);
+    case 'getKhatibSchedule': return await getKhatibSchedule_(db, b.khatibId, b.from, b.to);
+    case 'getScheduleHistory': return await getScheduleHistory_(db, b.from, b.before);
+    case 'listDates':         return await listDates_(db);
+    case 'getLoadCounts':     return await getLoadCounts_(db, b.from, b.to);
+    case 'createMosque':      return await saveMosque_(db, user, b, true);
+    case 'updateMosque':      return await saveMosque_(db, user, b, false);
+    case 'deactivateMosque':  return await deactivateMosque_(db, user, b.id);
+    case 'reorderMosque':     return await reorderMosque_(db, b);
+    case 'createKhatib':      return await saveKhatib_(db, user, b, true);
+    case 'updateKhatib':      return await saveKhatib_(db, user, b, false);
+    case 'deactivateKhatib':  return await deactivateKhatib_(db, user, b.id);
+    case 'setPreferences':    return await setPreferences_(db, b.khatibId, b.mosqueIds);
+    case 'generateDate':      return await generateDate_(db, user, b);
+    case 'regenerateDate':    return await regenerateDate_(db, user, b);
+    case 'saveSchedule':      return await saveSchedule_(db, user, b);
+    case 'publishRange':      return await publishRange_(db, b);
+    case 'getSettings':       return await getSettings_(db);
     case 'listUsers':         return await listUsers_(env.DB);
     case 'createUser':        return await createUser_(env.DB, env, b);
     case 'updateUser':        return await updateUser_(env.DB, user, b);

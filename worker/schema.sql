@@ -61,7 +61,8 @@ CREATE TABLE IF NOT EXISTS users (
   salt TEXT NOT NULL,
   active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
-  role TEXT NOT NULL DEFAULT 'coordinator' CHECK(role IN ('admin', 'coordinator', 'viewer'))
+  role TEXT NOT NULL DEFAULT 'coordinator' CHECK(role IN ('admin', 'coordinator', 'viewer')),
+  region_access TEXT NOT NULL DEFAULT 'both' CHECK(region_access IN ('15may', 'tebeen', 'both'))
 );
 
 -- 6. جلسات الدخول (sessions)
@@ -85,3 +86,21 @@ CREATE TABLE IF NOT EXISTS login_attempts (
   window_start TEXT NOT NULL
 );
 
+-- 9. جلسات الخطباء (khatib_sessions)
+CREATE TABLE IF NOT EXISTS khatib_sessions (
+  token TEXT PRIMARY KEY,
+  khatib_id TEXT NOT NULL REFERENCES khatibs(id) ON DELETE CASCADE,
+  phone TEXT NOT NULL,
+  expires_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_khatib_sessions_khatib ON khatib_sessions(khatib_id);
+
+-- 10. جاهزية الخطباء غير المكلفين (khatib_readiness)
+CREATE TABLE IF NOT EXISTS khatib_readiness (
+  date TEXT NOT NULL,
+  khatib_id TEXT NOT NULL REFERENCES khatibs(id) ON DELETE CASCADE,
+  status TEXT NOT NULL CHECK(status IN ('ready', 'excused', 'undecided')),
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (date, khatib_id)
+);
+CREATE INDEX IF NOT EXISTS idx_khatib_readiness_date ON khatib_readiness(date);

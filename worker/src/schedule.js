@@ -47,11 +47,18 @@ export async function getSchedule_(db, date) {
     };
   });
 
+  const readinessRows = await all(db, 'SELECT khatib_id, status FROM khatib_readiness WHERE date = ?', date);
+  const khatibReadiness = {};
+  for (const rr of readinessRows) {
+    khatibReadiness[rr.khatib_id] = rr.status;
+  }
+
   return ok_({
     date,
     exists: formatted.length > 0,
     version,
-    rows: formatted
+    rows: formatted,
+    khatibReadiness
   });
 }
 
@@ -209,7 +216,7 @@ export async function generateDate_(db, user, b) {
   for (const m of mosques) {
     const id = `${date}_${m.id}`;
     const pk = m.permanent_khatib_id || null;
-    const status = pk ? 'confirmed' : 'unassigned';
+    const status = 'unassigned';
     if (pk) prefilled++;
 
     stmts.push(db.prepare(`
@@ -285,7 +292,7 @@ export async function regenerateDate_(db, user, b) {
       stmts.push(db.prepare(`
         INSERT INTO assignments (id, date, mosque_id, khatib_id, status, date_type, label, updated_by, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).bind(newId, date, m.id, assign, assign ? 'confirmed' : 'unassigned', dateType, label, user.username, now));
+      `).bind(newId, date, m.id, assign, 'unassigned', dateType, label, user.username, now));
       added.push(`${m.name} ${m.mujawra}`);
       continue;
     }
@@ -297,7 +304,7 @@ export async function regenerateDate_(db, user, b) {
     }
 
     stmts.push(db.prepare(`
-      UPDATE assignments SET khatib_id = ?, status = 'confirmed', updated_by = ?, updated_at = ?
+      UPDATE assignments SET khatib_id = ?, status = 'unassigned', updated_by = ?, updated_at = ?
       WHERE id = ?
     `).bind(pk, user.username, now, cur.id));
     taken.add(pk);
@@ -441,7 +448,8 @@ export async function saveSchedule_(db, user, b) {
     const cur = onDate[c.mosqueId];
     if (!cur) continue;
     const kid = c.khatibId !== undefined ? (c.khatibId || null) : (cur ? cur.khatib_id : null);
-    const status = c.status || (kid ? 'confirmed' : 'unassigned');
+    // الإسناد الجديد ينتظر التأكيد؛ الحفظ بلا تغيير للخطيب يحافظ على رده الحالي.
+    const status = !kid ? 'unassigned' : (c.status || (kid === cur.khatib_id ? cur.status : 'unassigned'));
 
     stmts.push(db.prepare(`
       UPDATE assignments

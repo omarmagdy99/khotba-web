@@ -86,7 +86,8 @@
       var box = el('results');
       showLoading(box, 'جاري تحميل الجدول...');
       try {
-        var url = APPS_SCRIPT_URL + (date ? '?date=' + encodeURIComponent(date) : '');
+        var url = new URL(APPS_SCRIPT_URL);
+        if (date) url.searchParams.set('date', date);
         var res = await fetch(url);
         var json = await res.json();
         if (!json.ok) throw new Error(json.error.message);

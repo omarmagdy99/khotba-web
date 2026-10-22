@@ -128,15 +128,29 @@
 
         var banner = el('statusBanner');
         var publicUrl = new URL('public.html', window.location.href).href;
+        var portalUrl = new URL('khatib-portal.html', window.location.href).href;
         var linkBoxHtml =
-          '<div class="mt-2.5 p-2.5 bg-white rounded-3 border d-flex align-items-center justify-content-between gap-2 flex-wrap text-start" style="border-color:#bae6fd !important">' +
-            '<div class="d-flex align-items-center gap-2 overflow-hidden" style="flex:1;min-width:200px">' +
-              '<span class="fs-6">🔗</span>' +
-              '<a href="' + esc(publicUrl) + '" target="_blank" class="text-decoration-underline text-break fw-bold small" style="color:var(--navy)">' + esc(publicUrl) + '</a>' +
+          '<div class="mt-2.5 p-2.5 bg-white rounded-3 border text-start" style="border-color:#bae6fd !important">' +
+            '<div class="d-flex align-items-center justify-content-between gap-2 flex-wrap mb-2">' +
+              '<div class="d-flex align-items-center gap-2 overflow-hidden" style="flex:1;min-width:200px">' +
+                '<span class="fs-6">🔗</span>' +
+                '<a href="' + esc(publicUrl) + '" target="_blank" class="text-decoration-underline text-break fw-bold small" style="color:var(--navy)">' + esc(publicUrl) + '</a>' +
+              '</div>' +
+              '<div class="d-flex gap-2">' +
+                '<button type="button" class="btn btn-sm btn-ok shadow-sm px-3 rounded-pill" onclick="copyPublicLink(\'' + esc(publicUrl) + '\')">' +
+                  '📋 نسخ الرابط العام' +
+                '</button>' +
+                '<button type="button" class="btn btn-sm shadow-sm px-3 rounded-pill" style="background:#25D366;color:#fff" onclick="shareWhatsApp(\'' + esc(publicUrl) + '\')">' +
+                  '🟢 واتساب' +
+                '</button>' +
+              '</div>' +
             '</div>' +
-            '<button type="button" class="btn btn-sm btn-ok shadow-sm px-3 rounded-pill" onclick="copyPublicLink(\'' + esc(publicUrl) + '\')">' +
-              '📋 نسخ رابط النشر' +
-            '</button>' +
+            '<div class="d-flex align-items-center justify-content-between gap-2 flex-wrap pt-2 border-top">' +
+              '<div class="small text-muted">🎙️ رابط بوابة تأكيد الحضور والاعتذار للخطباء:</div>' +
+              '<button type="button" class="btn btn-sm btn-plain shadow-sm px-3 rounded-pill" onclick="copyPortalLink()">' +
+                '📋 نسخ رابط بوابة الخطباء' +
+              '</button>' +
+            '</div>' +
           '</div>';
 
         if (publishMode === 'auto') {
@@ -292,6 +306,17 @@
     }
     el('publishFrom').addEventListener('change', onRangeChange);
     el('publishTo').addEventListener('change', onRangeChange);
+
+    function shareWhatsApp(url) {
+      var text = encodeURIComponent('🕌 جدول خطب الجمعة — ' + REGION_NAME + ':\n' + url);
+      window.open('https://api.whatsapp.com/send?text=' + text, '_blank');
+    }
+
+    function copyPortalLink() {
+      var portalUrl = new URL('khatib-portal.html', window.location.href).href;
+      copyPublicLink(portalUrl);
+      toast('تم نسخ رابط بوابة الخطباء بنجاح 🎙️', 'ok');
+    }
 
     function copyPublicLink(url) {
       if (navigator.clipboard && navigator.clipboard.writeText) {

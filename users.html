@@ -68,6 +68,15 @@
         </div>
 
         <div class="field">
+          <label for="addRegionAccess">صلاحية المنطقة *</label>
+          <select id="addRegionAccess" required>
+            <option value="15may">15 مايو فقط</option>
+            <option value="tebeen">التبين فقط</option>
+            <option value="both">المنطقتان معًا</option>
+          </select>
+        </div>
+
+        <div class="field">
           <label for="addPassword">كلمة المرور *</label>
           <input type="password" id="addPassword" required autocomplete="new-password" placeholder="8 أحرف على الأقل">
           <div class="hint">8 أحرف على الأقل، وتكون مختلفة عن اسم المستخدم</div>
@@ -101,7 +110,7 @@
         </div>
 
         <div id="selfEditNotice" class="notice notice-warn" style="display:none;margin-bottom:8px">
-          ⚠️ هذا حسابك الحالي: لا يمكنك تغيير دورك أو إلغاء تنشيط حسابك بنفسك. لتغيير كلمة المرور توجه لصفحة <a href="account.html" style="font-weight:bold;color:var(--navy)">كلمة المرور</a>.
+          ⚠️ هذا حسابك الحالي: لا يمكنك تغيير دورك أو مناطق حسابك أو إلغاء تنشيطه بنفسك. لتغيير كلمة المرور توجه لصفحة <a href="account.html" style="font-weight:bold;color:var(--navy)">كلمة المرور</a>.
         </div>
 
         <div class="field">
@@ -116,6 +125,16 @@
             <option value="viewer">مشاهد (قراءة وتصدير فقط)</option>
             <option value="admin">مدير النظام (كامل الصلاحيات بما فيها إدارة المستخدمين)</option>
           </select>
+        </div>
+
+        <div class="field">
+          <label for="editRegionAccess">صلاحية المنطقة *</label>
+          <select id="editRegionAccess" required>
+            <option value="15may">15 مايو فقط</option>
+            <option value="tebeen">التبين فقط</option>
+            <option value="both">المنطقتان معًا</option>
+          </select>
+          <div class="hint">تغيير المنطقة يسري على الجلسات المفتوحة أيضًا.</div>
         </div>
 
         <div class="field">
@@ -230,6 +249,12 @@
       return role || '—';
     }
 
+    function getRegionLabel(access) {
+      if (access === '15may') return '15 مايو فقط';
+      if (access === 'tebeen') return 'التبين فقط';
+      return access === 'both' ? 'المنطقتان معًا' : '—';
+    }
+
     function getRoleBadge(role) {
       if (role === 'admin') return '<span class="badge badge-primary">مدير النظام</span>';
       if (role === 'coordinator') return '<span class="badge badge-volunteer">منسق</span>';
@@ -252,7 +277,7 @@
         var matchDisplay = matches(u.displayName, query);
         var matchUser = matches(u.username, query);
         var matchRole = matches(getRoleLabel(u.role), query);
-        return matchDisplay || matchUser || matchRole;
+        return matchDisplay || matchUser || matchRole || matches(getRegionLabel(u.regionAccess), query);
       });
     }
 
@@ -283,7 +308,7 @@
           '<div>الاسم المعروض</div>' +
           '<div>اسم المستخدم</div>' +
           '<div>الدور</div>' +
-          '<div>الحالة</div>' +
+          '<div>الحالة والمنطقة</div>' +
           '<div>إجراءات</div>' +
         '</div>';
 
@@ -303,7 +328,7 @@
           '<div data-label="الاسم المعروض"><strong>' + esc(u.displayName) + '</strong>' + selfBadge + '</div>' +
           '<div data-label="اسم المستخدم"><span class="mono">' + esc(u.username) + '</span></div>' +
           '<div data-label="الدور">' + getRoleBadge(u.role) + '</div>' +
-          '<div data-label="الحالة">' + getActiveBadge(u.active) + '</div>' +
+          '<div data-label="الحالة والمنطقة">' + getActiveBadge(u.active) + '<div class="hint">' + esc(getRegionLabel(u.regionAccess)) + '</div></div>' +
           '<div data-label="إجراءات" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">' +
             actionsHtml +
           '</div>' +
@@ -333,6 +358,7 @@
 
     function openAddModal() {
       el('addUserForm').reset();
+      el('addRegionAccess').value = REGION_ID;
       hideAddFormError();
       el('addUserModal').classList.add('show');
       el('addUsername').focus();
@@ -408,7 +434,8 @@
           username: username,
           displayName: displayName,
           password: password,
-          role: role
+          role: role,
+          regionAccess: el('addRegionAccess').value
         });
         closeAddModal();
         toast('تمت إضافة المستخدم بنجاح', 'ok');
@@ -433,6 +460,8 @@
       el('editUsernameDisplay').textContent = u.username;
       el('editDisplayName').value = u.displayName || '';
       el('editRole').value = u.role || 'viewer';
+      el('editRegionAccess').value = u.regionAccess;
+      el('editRegionAccess').disabled = isSelf;
       el('editActive').checked = isUserActive(u.active);
 
       el('editRole').disabled = isSelf;
@@ -487,7 +516,8 @@
           username: username,
           displayName: displayName,
           role: role,
-          active: active
+          active: active,
+          regionAccess: isSelf ? u.regionAccess : el('editRegionAccess').value
         });
         closeEditModal();
         toast('تم تعديل بيانات المستخدم بنجاح', 'ok');

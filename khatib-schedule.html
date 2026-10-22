@@ -229,7 +229,9 @@
           if (assign.status === 'confirmed') {
             statusBadge = '<span class="badge badge-volunteer">مؤكد</span>';
           } else if (assign.status === 'excused') {
-            statusBadge = '<span class="badge badge-warn">معتذر</span>';
+            statusBadge = '<span class="badge badge-excused">معتذر</span>';
+          } else if (assign.status === 'unassigned') {
+            statusBadge = '<span class="badge badge-off">لم يتم التأكيد</span>';
           } else {
             statusBadge = '<span class="badge badge-primary">' + esc(assign.status || 'مخصص') + '</span>';
           }

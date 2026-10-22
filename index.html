@@ -26,6 +26,13 @@
           <div id="loginError" class="notice notice-err" style="display:none"></div>
           <button type="submit" class="btn btn-primary w-100 rounded-pill py-2.5 fw-bold shadow-sm" id="loginBtn" style="background:var(--navy);border:none">دخول</button>
         </form>
+
+        <div class="text-center mt-3 pt-3 border-top">
+          <a href="khatib-portal.html" class="text-decoration-none small text-primary fw-bold d-inline-flex align-items-center gap-1">
+            <span>🎙️</span>
+            <span>بوابة السادة الخطباء (تأكيد الحضور والاعتذار) ←</span>
+          </a>
+        </div>
       </div>
     </div>
   </div>
@@ -41,8 +48,8 @@
     (async function () {
       if (!getToken()) { appReady(); return; }
       try {
-        await api('whoami');
-        location.href = 'schedule.html';
+        var me = await api('whoami');
+        goAllowedRegion(me.regionAccess);
       } catch (e) {
         clearToken();
         appReady();
@@ -65,7 +72,7 @@
         localStorage.setItem('awqaf_name', data.displayName);
         if (data.username) localStorage.setItem('awqaf_username', data.username);
         if (data.role) localStorage.setItem('awqaf_role', data.role);
-        location.href = 'schedule.html';
+        goAllowedRegion(data.regionAccess);
       } catch (e) {
         errBox.textContent = e.message;
         errBox.style.display = 'block';

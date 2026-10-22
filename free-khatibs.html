@@ -135,7 +135,7 @@
         (schedRes.rows || []).forEach(function (r) {
           var kId = String(r.khatibId || '');
           if (!kId) return;
-          if (r.status === 'confirmed') {
+          if (r.status !== 'excused') {
             confirmedKhatibIds.add(kId);
           } else if (r.status === 'excused') {
             var mName = r.mosque || ('مسجد ' + r.mosqueId);
@@ -151,10 +151,13 @@
           return k.active !== false && k.active !== 0;
         });
 
+        var readinessMap = schedRes.khatibReadiness || {};
         allFreeKhatibs = [];
         activeKhatibs.forEach(function (k) {
           var kId = String(k.id || '');
           if (confirmedKhatibIds.has(kId)) return;
+
+          var readiness = readinessMap[kId] || 'undecided';
 
           var note = '';
           if (excusedMosquesByKhatib[kId]) {
@@ -166,6 +169,7 @@
             name: k.name || '',
             phone: k.phone || '',
             type: k.type || 'primary',
+            readiness: readiness,
             note: note
           });
         });
@@ -227,9 +231,18 @@
         var phoneHtml = k.phone && k.phone.trim()
           ? '<span class="mono" dir="ltr">' + esc(k.phone) + '</span>'
           : '<span class="muted">—</span>';
-        var noteHtml = k.note
-          ? '<span class="badge badge-warn">' + esc(k.note) + '</span>'
-          : '<span class="muted">—</span>';
+        var noteParts = [];
+        if (k.readiness === 'ready') {
+          noteParts.push('<span class="badge badge-volunteer">🟢 مستعد للخطابة</span>');
+        } else if (k.readiness === 'excused') {
+          noteParts.push('<span class="badge badge-warn" style="background:#fee2e2;color:#991b1b">🚫 معتذر</span>');
+        } else {
+          noteParts.push('<span class="badge badge-off">⚪ لم يحدد</span>');
+        }
+        if (k.note) {
+          noteParts.push('<span class="badge badge-warn">' + esc(k.note) + '</span>');
+        }
+        var noteHtml = noteParts.join(' ');
 
         html += '<div class="table-row" style="grid-template-columns: 2fr 1.5fr 1fr 2fr;">' +
           '<div data-label="الخطيب"><strong>' + esc(k.name) + '</strong></div>' +

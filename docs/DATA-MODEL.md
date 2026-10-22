@@ -140,7 +140,7 @@ express, and why 60+ mosque-Fridays silently had a number where a name should ha
 | Value | Arabic label | Meaning |
 | --- | --- | --- |
 | `confirmed` | `مؤكد` | Assigned and expected to attend |
-| `unassigned` | `شاغر` | Row exists, no khatib yet |
+| `unassigned` | `شاغر` / `لم يتم التأكيد` | Vacant if no khatib; awaiting confirmation when a khatib is assigned |
 | `excused` | `معتذر` | Assigned khatib withdrew; needs a replacement |
 
 Rows are created in bulk when an admin generates a Friday, so an entire date's 85 rows exist

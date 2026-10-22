@@ -1,6 +1,4 @@
-/**
- * أوقاف 15 مايو — إعداد Cloudflare Worker
- */
+/** أوقاف 15 مايو والتبين — قواعد بيانات منفصلة، وحسابات دخول مشتركة */
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "khotba-api",
@@ -9,15 +7,23 @@
   "observability": {
     "enabled": true
   },
-  "workers_dev": true,
+  "workers_dev": false,
   "routes": [
-    { "pattern": "khotba-api.daaw.dev", "custom_domain": true }
+    {
+      "pattern": "khotba-api.daaw.dev",
+      "custom_domain": true
+    }
   ],
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "khotba-db",
       "database_id": "2a6d0a44-1c19-4874-9c7a-59938f48855d"
+    },
+    {
+      "binding": "DB_TEBEEN",
+      "database_name": "khotba-tebeen-db",
+      "database_id": "ad217b80-302b-4366-9375-ca4108ba501c"
     }
   ]
 }
