@@ -21,6 +21,7 @@ const context = vm.createContext({
 });
 const html = fs.readFileSync(path.join(root, 'schedule.html'), 'utf8');
 let script = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].at(-1)[1];
+for (const asset of ['availability.js', 'sermon-calendar.js']) vm.runInContext(fs.readFileSync(path.join(root, 'assets', asset), 'utf8'), context);
 // Skip page bootstrapping; exercise the real renderer, filters and edit handlers.
 script = script.replace(/    \(async function \(\) \{[\s\S]*?    \}\)\(\);/, '');
 vm.runInContext(script, context);

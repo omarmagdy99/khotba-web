@@ -40,6 +40,7 @@
           <option value="">كل الحالات</option>
           <option value="ready">مستعد</option>
           <option value="excused">معتذر</option>
+          <option value="unavailable">غير متواجد</option>
           <option value="no_reply">لم يرد</option>
         </select>
       </div>
@@ -62,9 +63,19 @@
 
   <script src="config.js"></script>
   <script src="assets/app.js"></script>
+  <script src="assets/availability.js"></script>
+  <script src="assets/sermon-calendar.js"></script>
   <script src="assets/khatib-status.js"></script>
   <script>
     renderNav('schedule.html');
+
+    var _cal = SermonCalendar;
+
+    if (typeof KhatibStatus !== 'undefined' && KhatibStatus.setAvailabilityHelper) {
+      KhatibStatus.setAvailabilityHelper(function (khatib, date) {
+        return _cal.isKhatibAvailable(khatib, date || currentDate, typeof REGION_ID !== 'undefined' ? REGION_ID : '15may');
+      });
+    }
 
     var currentDate = '';
     var allFreeKhatibs = [];
@@ -127,7 +138,10 @@
 
     async function loadData() {
       var targetDate = currentDate;
-      el('headingTitle').textContent = 'الخطباء بدون خطبة — ' + formatDate(targetDate);
+      isGenerated = false;
+      allFreeKhatibs = [];
+      currentFiltered = [];
+      el('headingTitle').textContent = 'الخطباء بدون خطبة — ' + _cal.formatDate(targetDate);
       el('countBadge').style.display = 'none';
       el('actionsBar').style.display = 'none';
       showLoading(el('results'), 'جاري تحميل البيانات...');
@@ -166,6 +180,11 @@
           // الخطيب قيد التكليف غير المؤكد أو المؤكد لا يدخل في قائمة الخطباء غير المكلفين
           if (!state.isFree) return;
 
+          var ruleText = '';
+          if (k.availability && k.availability.mode === 'custom') {
+            ruleText = _cal.formatRule(k.availability, { short: true });
+          }
+
           allFreeKhatibs.push({
             id: state.id,
             name: state.name,
@@ -175,7 +194,8 @@
             statusLabel: state.statusLabel,
             statusBadgeHtml: state.statusBadgeHtml,
             excuseDetail: state.excuseDetail,
-            exportStatusText: state.exportStatusText
+            exportStatusText: state.exportStatusText,
+            ruleText: ruleText
           });
         });
 
@@ -189,12 +209,18 @@
         applyFilter();
       } catch (e) {
         if (currentDate !== targetDate) return;
+        isGenerated = false;
+        allFreeKhatibs = [];
+        currentFiltered = [];
         showError(el('results'), e.message, function () { loadData(); });
       }
     }
 
     function applyFilter() {
-      if (!isGenerated) return;
+      if (!isGenerated) {
+        currentFiltered = [];
+        return;
+      }
 
       var query = (searchInput.value || '').trim();
       var statusFilter = statusFilterEl ? statusFilterEl.value : '';
@@ -245,7 +271,7 @@
         var statusHtml = statusBadges.join(' ');
 
         html += '<div class="table-row" style="grid-template-columns: 2fr 1.5fr 1fr 2fr;">' +
-          '<div data-label="الخطيب"><strong>' + esc(k.name) + '</strong></div>' +
+          '<div data-label="الخطيب"><strong>' + esc(k.name) + '</strong>' + (k.ruleText ? ' <span class="muted" style="font-size:.82em">(' + esc(k.ruleText) + ')</span>' : '') + '</div>' +
           '<div data-label="الموبايل">' + phoneHtml + '</div>' +
           '<div data-label="النوع">' + typeBadge + '</div>' +
           '<div data-label="الحالة">' + statusHtml + '</div>' +
@@ -257,7 +283,7 @@
     }
 
     function getExportData() {
-      var title = 'الخطباء بدون خطبة — ' + formatDate(currentDate);
+      var title = 'الخطباء بدون خطبة — ' + _cal.formatDate(currentDate);
       var headers = ['الخطيب', 'الموبايل', 'النوع', 'الحالة'];
       var exportRows = currentFiltered.map(function (k) {
         return [

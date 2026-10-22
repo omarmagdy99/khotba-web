@@ -309,11 +309,11 @@ console.log('--- اختبارات حالات وجاهزية الخطباء وا�
     };
 
     const mockKhatibs = [
-      { id: '1', name: 'الشيخ علي', phone: '0101', type: 'primary', active: 1 },
-      { id: '2', name: 'الشيخ حسن', phone: '0102', type: 'volunteer', active: 1 },
-      { id: '3', name: 'الشيخ يوسف', phone: '0103', type: 'primary', active: 1 },
-      { id: '4', name: 'الشيخ عثمان', phone: '0104', type: 'volunteer', active: 1 },
-      { id: '5', name: 'الشيخ معطل', phone: '0105', type: 'primary', active: 0 }, // inactive
+      { id: '1', name: 'الشيخ علي', phone: '0101', type: 'primary', active: 1, availability: { mode: 'all', weeks: [1, 2, 3, 4, 5] } },
+      { id: '2', name: 'الشيخ حسن', phone: '0102', type: 'volunteer', active: 1, availability: { mode: 'all', weeks: [1, 2, 3, 4, 5] } },
+      { id: '3', name: 'الشيخ يوسف', phone: '0103', type: 'primary', active: 1, availability: { mode: 'all', weeks: [1, 2, 3, 4, 5] } },
+      { id: '4', name: 'الشيخ عثمان', phone: '0104', type: 'volunteer', active: 1, availability: { mode: 'all', weeks: [1, 2, 3, 4, 5] } },
+      { id: '5', name: 'الشيخ معطل', phone: '0105', type: 'primary', active: 0, availability: { mode: 'all', weeks: [1, 2, 3, 4, 5] } }, // inactive
     ];
 
     const mockSchedule = {
@@ -371,6 +371,8 @@ console.log('--- اختبارات حالات وجاهزية الخطباء وا�
 
     // Run shared scripts
     vm.runInContext(fs.readFileSync(path.join(root, 'config.js'), 'utf8'), vmContext);
+    vm.runInContext(fs.readFileSync(path.join(root, 'assets/availability.js'), 'utf8'), vmContext);
+    vm.runInContext(fs.readFileSync(path.join(root, 'assets/sermon-calendar.js'), 'utf8'), vmContext);
     vm.runInContext(fs.readFileSync(path.join(root, 'assets/khatib-status.js'), 'utf8'), vmContext);
 
     const freeHtml = fs.readFileSync(path.join(root, 'free-khatibs.html'), 'utf8');
@@ -438,10 +440,10 @@ console.log('--- اختبارات حالات وجاهزية الخطباء وا�
     };
 
     const mockKhatibs = [
-      { id: '1', name: 'الشيخ علي', phone: '0101', type: 'primary', active: 1 },
-      { id: '2', name: 'الشيخ حسن', phone: '0102', type: 'volunteer', active: 1 },
-      { id: '3', name: 'الشيخ يوسف', phone: '0103', type: 'primary', active: 1 },
-      { id: '4', name: 'الشيخ عثمان', phone: '0104', type: 'volunteer', active: 1 },
+      { id: '1', name: 'الشيخ علي', phone: '0101', type: 'primary', active: 1, availability: { mode: 'all', weeks: [1, 2, 3, 4, 5] } },
+      { id: '2', name: 'الشيخ حسن', phone: '0102', type: 'volunteer', active: 1, availability: { mode: 'all', weeks: [1, 2, 3, 4, 5] } },
+      { id: '3', name: 'الشيخ يوسف', phone: '0103', type: 'primary', active: 1, availability: { mode: 'all', weeks: [1, 2, 3, 4, 5] } },
+      { id: '4', name: 'الشيخ عثمان', phone: '0104', type: 'volunteer', active: 1, availability: { mode: 'all', weeks: [1, 2, 3, 4, 5] } },
     ];
 
     const mockSchedule = {
@@ -493,6 +495,8 @@ console.log('--- اختبارات حالات وجاهزية الخطباء وا�
     });
 
     vm.runInContext(fs.readFileSync(path.join(root, 'config.js'), 'utf8'), vmContext);
+    vm.runInContext(fs.readFileSync(path.join(root, 'assets/availability.js'), 'utf8'), vmContext);
+    vm.runInContext(fs.readFileSync(path.join(root, 'assets/sermon-calendar.js'), 'utf8'), vmContext);
     vm.runInContext(fs.readFileSync(path.join(root, 'assets/khatib-status.js'), 'utf8'), vmContext);
 
     const reportHtml = fs.readFileSync(path.join(root, 'khatib-status-report.html'), 'utf8');

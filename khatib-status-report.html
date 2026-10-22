@@ -40,6 +40,7 @@
           <option value="">كل الحالات</option>
           <option value="ready">مستعد</option>
           <option value="excused">معتذر</option>
+          <option value="unavailable">غير متواجد</option>
           <option value="no_reply">لم يرد</option>
         </select>
       </div>
@@ -70,9 +71,16 @@
 
   <script src="config.js"></script>
   <script src="assets/app.js"></script>
+  <script src="assets/availability.js"></script>
+  <script src="assets/sermon-calendar.js"></script>
   <script src="assets/khatib-status.js"></script>
   <script>
     renderNav('schedule.html');
+
+    var _cal = SermonCalendar;
+    KhatibStatus.setAvailabilityHelper(function (khatib, date) {
+      return _cal.isKhatibAvailable(khatib, date || currentDate, typeof REGION_ID !== 'undefined' ? REGION_ID : '15may');
+    });
 
     var currentDate = '';
     var allKhatibReports = [];
@@ -176,6 +184,7 @@
         allKhatibReports = [];
         activeKhatibs.forEach(function (k) {
           var state = KhatibStatus.resolveKhatibState(k, schedRes);
+          state.availability = k.availability || null;
           allKhatibReports.push(state);
         });
 
@@ -262,7 +271,7 @@
     }
 
     function getExportData() {
-      var title = 'تقرير حالات وجاهزية الخطباء — ' + formatDate(currentDate);
+      var title = 'تقرير حالات وجاهزية الخطباء — ' + _cal.formatDate(currentDate);
       var headers = ['الخطيب', 'الموبايل', 'النوع', 'الحالة', 'التكليف والمسجد'];
       var exportRows = currentFiltered.map(function (k) {
         return [

@@ -189,6 +189,8 @@
 
   <script src="config.js"></script>
   <script src="assets/app.js"></script>
+  <script src="assets/availability.js"></script>
+  <script src="assets/sermon-calendar.js"></script>
   <script>
     var currentKhatib = null;
     var khatibTokenKey = 'awqaf_khatib_token_' + REGION_ID;
@@ -309,7 +311,7 @@
       chipsBox.innerHTML = dates.map(function (d) {
         var isActive = (d === activeDate);
         return '<button type="button" class="chip' + (isActive ? ' active' : '') + '" onclick="selectDate(\'' + esc(d) + '\')">' +
-          esc(formatDate(d)) + '</button>';
+          esc(SermonCalendar.formatDate(d)) + '</button>';
       }).join('');
     }
 
@@ -321,7 +323,7 @@
 
     function renderFridayDetails(data) {
       var contentBox = el('fridayContent');
-      var dateLabel = formatDate(data.date);
+      var dateLabel = SermonCalendar.formatDate(data.date);
 
       if (data.hasAssignment && data.assignment) {
         var a = data.assignment;

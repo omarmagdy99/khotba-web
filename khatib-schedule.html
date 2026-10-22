@@ -47,8 +47,17 @@
 
   <script src="config.js"></script>
   <script src="assets/app.js"></script>
+  <script src="assets/availability.js"></script>
+  <script src="assets/sermon-calendar.js"></script>
   <script>
     renderNav('khatib-schedule.html');
+
+    var _cal = typeof SermonCalendar !== 'undefined' ? SermonCalendar : {
+      isKhatibAvailable: function () { return true; },
+      formatDate: function (d) { return typeof formatDate === 'function' ? formatDate(d) : d; },
+      formatRule: function () { return 'كل جمعة'; },
+      isSpecialDate: function () { return false; }
+    };
 
     var allKhatibs = [];
     var initialKhatibId = '';
@@ -198,7 +207,7 @@
         '<div style="text-align:center; margin-bottom:20px; border-bottom:2px solid var(--navy); padding-bottom:14px">' +
           '<h2 style="color:var(--navy); font-size:1.35em; margin-bottom:6px">🎙️ جدول خطب الجمعة: ' + esc(khatibName) + '</h2>' +
           '<p style="color:var(--muted); font-size:.9em">' +
-            'الفترة من <strong>' + esc(formatDate(from)) + '</strong> إلى <strong>' + esc(formatDate(to)) + '</strong>' +
+            'الفترة من <strong>' + esc(_cal.formatDate(from)) + '</strong> إلى <strong>' + esc(_cal.formatDate(to)) + '</strong>' +
           '</p>' +
           '<div style="margin-top:10px">' +
             '<span class="total-badge">' + esc(filledCount) + ' خطب في الفترة المختارة</span>' +
@@ -237,7 +246,7 @@
           }
 
           html += '<div class="table-row" style="grid-template-columns: 1.5fr 1.2fr 2fr 1.2fr 1fr;">' +
-            '<div data-label="التاريخ"><strong>' + esc(formatDate(dIso)) + '</strong></div>' +
+            '<div data-label="التاريخ"><strong>' + esc(_cal.formatDate(dIso)) + '</strong></div>' +
             '<div data-label="المناسبة / اليوم">' + esc(labelText) + '</div>' +
             '<div data-label="المسجد"><strong style="color:var(--navy)">' + esc(assign.mosque || '?') + '</strong></div>' +
             '<div data-label="المجاورة">' + (assign.mujawra ? '<span class="area-badge">' + esc(assign.mujawra) + '</span>' : '<span class="muted">—</span>') + '</div>' +
@@ -246,7 +255,7 @@
         } else {
           // Free Friday gap
           html += '<div class="table-row" style="grid-template-columns: 1.5fr 1.2fr 2fr 1.2fr 1fr; background:#fafbfc">' +
-            '<div data-label="التاريخ">' + esc(formatDate(dIso)) + '</div>' +
+            '<div data-label="التاريخ">' + esc(_cal.formatDate(dIso)) + '</div>' +
             '<div data-label="المناسبة / اليوم">' + esc(labelText) + '</div>' +
             '<div data-label="المسجد"><span class="muted">— لا يوجد</span></div>' +
             '<div data-label="المجاورة"><span class="muted">—</span></div>' +

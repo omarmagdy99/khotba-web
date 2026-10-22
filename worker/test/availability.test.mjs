@@ -527,3 +527,64 @@ test('CRUD - Omitted availability preserves stored rule on old client updates on
   assert.equal(k.notes, 'ملاحظة محدثة من عميل قديم');
   assert.deepEqual(k.availability, { mode: 'custom', weeks: [1, 5] });
 });
+
+// ════════════════════════════════════════════════════════════════════
+// 10. Chained migrations 0005 -> 0006 on a populated legacy database
+// ════════════════════════════════════════════════════════════════════
+
+test('MIGRATION CHAIN: legacy populated DB -> 0005 -> 0006 preserves rows and converges on the fresh schema', () => {
+  const legacySchema = getLegacySchema().split('-- 11. طلبات مراجعة الاعتذار')[0];
+  const migrations = ['0005_excuse_requests.sql', '0006_khatib_availability.sql']
+    .map((f) => fs.readFileSync(path.join(rootDir, 'worker/migrations', f), 'utf8'));
+  const dataTables = ['users', 'mosques', 'preferences', 'assignments', 'settings', 'khatib_readiness'];
+  const oldKhatibCols = 'id, name, phone, type, notes, active, created_at';
+
+  // Two independent databases (one per region), each with its own populated legacy rows
+  for (const region of ['may', 'tebeen']) {
+    const db = new DatabaseSync(':memory:');
+    db.exec(legacySchema);
+    db.exec(`
+      INSERT INTO users (username, display_name, password_hash, salt, active, created_at, role, region_access)
+      VALUES ('${region}_admin', 'أدمن ${region}', 'h', 's', 1, '2026-08-01T00:00:00Z', 'admin', '${region === 'may' ? '15may' : 'tebeen'}');
+      INSERT INTO mosques (id, name, mujawra, address, permanent_khatib_id, active, created_at, sort_order)
+      VALUES ('M1', 'مسجد ${region}', 'مجاورة 1', 'شارع', 'K1', 1, '2026-08-01T00:00:00Z', 1);
+      INSERT INTO khatibs (id, name, phone, type, notes, active, created_at)
+      VALUES ('K1', 'خطيب 1', '01011111111', 'primary', 'ن1', 1, '2026-08-01T00:00:00Z'),
+             ('K2', 'خطيب 2', '01022222222', 'volunteer', 'ن2', 0, '2026-08-02T00:00:00Z');
+      INSERT INTO preferences (khatib_id, mosque_id) VALUES ('K1', 'M1'), ('K2', 'M1');
+      INSERT INTO assignments (id, date, mosque_id, khatib_id, status, date_type, label, updated_by, updated_at)
+      VALUES ('2026-10-23_M1', '2026-10-23', 'M1', 'K1', 'confirmed', 'friday', '', 'a', '2026-10-20T10:00:00Z');
+      INSERT INTO settings (key, value) VALUES ('next_khatib_seq', '42');
+      INSERT INTO khatib_readiness (date, khatib_id, status, updated_at)
+      VALUES ('2026-10-23', 'K2', 'ready', '2026-10-21T12:00:00Z');
+    `);
+
+    const before = {};
+    for (const t of dataTables) before[t] = db.prepare(`SELECT * FROM ${t}`).all();
+    const khatibsBefore = db.prepare(`SELECT ${oldKhatibCols} FROM khatibs ORDER BY id`).all();
+
+    for (const sql of migrations) db.exec(sql);
+
+    for (const t of dataTables) {
+      assert.deepEqual(db.prepare(`SELECT * FROM ${t}`).all(), before[t], `${region}: ${t} unchanged after chain`);
+    }
+    assert.deepEqual(db.prepare(`SELECT ${oldKhatibCols} FROM khatibs ORDER BY id`).all(), khatibsBefore, `${region}: legacy khatib columns unchanged`);
+    for (const k of db.prepare('SELECT * FROM khatibs').all()) {
+      assert.equal(k.availability_mode, 'all');
+      assert.equal(k.availability_weeks, null);
+    }
+    assert.equal(db.prepare('SELECT COUNT(*) AS c FROM excuse_requests').get().c, 0);
+
+    // Migrated structure must match a fresh install of schema.sql
+    const fresh = new DatabaseSync(':memory:');
+    fresh.exec(fs.readFileSync(path.join(rootDir, 'worker/schema.sql'), 'utf8'));
+    const shape = (d) => {
+      const out = {};
+      for (const { name } of d.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all()) {
+        out[name] = d.prepare(`PRAGMA table_info(${name})`).all().map((c) => `${c.name}:${c.type}:${c.notnull}:${c.dflt_value}:${c.pk}`).sort();
+      }
+      return out;
+    };
+    assert.deepEqual(shape(db), shape(fresh), `${region}: migrated schema converges with fresh schema.sql`);
+  }
+});

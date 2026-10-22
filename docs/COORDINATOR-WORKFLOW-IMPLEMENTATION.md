@@ -3,7 +3,7 @@
 ## Overview
 This document details the complete implementation and hardening of **Feature A: Excuse Review After Attendance Confirmation** in the Arabic RTL Friday-sermon application for Awqaf 15 May and Al-Tebeen.
 
-All modifications are strictly confined to Phase A requirements. Features B and C remain deferred for subsequent phases.
+All modifications are strictly confined to Phase A requirements. Features B and C were subsequently merged into the same combined branch (see KHATIB-AVAILABILITY.md and KHATIB-STATUS-REPORTS.md).
 
 ---
 
@@ -122,6 +122,6 @@ All modifications are strictly confined to Phase A requirements. Features B and 
 ---
 
 ## 4. Unresolved Limitations & Boundary Constraints
-- **Phase A Boundary**: No coordinator manual editing of weekly readiness, monthly availability, or report exports were added in this run (deferred to Phase B).
-- **Hijri / Calendar UI**: Hijri calendar adjustments and special occasions deferred to Phase C.
+- **Phase A Boundary**: No coordinator manual editing of weekly readiness, monthly availability, or report exports were added in this run (delivered in Phase B).
+- **Hijri / Calendar UI**: Hijri calendar adjustments and special occasions delivered in Phase C (assets/sermon-calendar.js).
 - **Git State**: No commits, staging, or deployment operations were performed, preserving all work in the isolated worktree for independent orchestrator review.
