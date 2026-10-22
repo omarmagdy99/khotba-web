@@ -3,8 +3,11 @@
 import { all, one, run, batch } from './db.js';
 import { nextId_ } from './settings.js';
 import { ok_, err_, norm_, normPhone, isValidPhone, isTrue_, nowIso_, todayIso_ } from './util.js';
+import { validateAvailability, parseStoredAvailability } from './availability.js';
 
 export function publicKhatib_(k, prefs = []) {
+  const availability = parseStoredAvailability(k);
+
   return {
     id: k.id,
     name: k.name,
@@ -13,6 +16,7 @@ export function publicKhatib_(k, prefs = []) {
     notes: k.notes || '',
     active: isTrue_(k.active),
     preferences: prefs,
+    availability: availability,
   };
 }
 
@@ -54,13 +58,42 @@ export async function saveKhatib_(db, user, b, isNew) {
 
   const type = b.type === 'volunteer' ? 'volunteer' : 'primary';
 
+  // معالجة والتحقق من التوفر الشهري المتكرر
+  let hasAvailabilityUpdate = false;
+  let finalMode = 'all';
+  let finalWeeks = null;
+
+  // رفض التمرير الصريح لـ null
+  if (b.availability === null || b.availability_mode === null) {
+    return err_('BAD_REQUEST', 'بيانات التوفر لا يمكن أن تكون فارغة (null)');
+  }
+
+  if (b.availability !== undefined || b.availability_mode !== undefined) {
+    hasAvailabilityUpdate = true;
+    let availObj = b.availability;
+    if (availObj === undefined) {
+      let rawWeeks = b.availability_weeks;
+      if (typeof rawWeeks === 'string') {
+        try { rawWeeks = JSON.parse(rawWeeks); } catch (e) {}
+      }
+      availObj = { mode: b.availability_mode, weeks: rawWeeks };
+    }
+
+    const val = validateAvailability(availObj);
+    if (!val.valid) {
+      return err_('BAD_REQUEST', val.error);
+    }
+    finalMode = val.value.mode;
+    finalWeeks = finalMode === 'custom' ? JSON.stringify(val.value.weeks) : null;
+  }
+
   if (isNew) {
     const allKhatibs = await all(db, 'SELECT id, name FROM khatibs');
     const id = await nextId_(db, 'next_khatib_seq', 'K');
     const now = nowIso_();
     await run(db,
-      'INSERT INTO khatibs (id, name, phone, type, notes, active, created_at) VALUES (?, ?, ?, ?, ?, 1, ?)',
-      id, name, rawPhone, type, b.notes || '', now
+      'INSERT INTO khatibs (id, name, phone, type, notes, active, created_at, availability_mode, availability_weeks) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)',
+      id, name, rawPhone, type, b.notes || '', now, finalMode, finalWeeks
     );
 
     const normName = norm_(name);
@@ -75,10 +108,18 @@ export async function saveKhatib_(db, user, b, isNew) {
   if (!existing) return err_('NOT_FOUND', 'الخطيب غير موجود');
 
   const active = b.active === false || b.active === 0 || b.active === 'FALSE' ? 0 : 1;
-  await run(db,
-    'UPDATE khatibs SET name = ?, phone = ?, type = ?, notes = ?, active = ? WHERE id = ?',
-    name, rawPhone, type, b.notes || '', active, b.id
-  );
+  if (hasAvailabilityUpdate) {
+    await run(db,
+      'UPDATE khatibs SET name = ?, phone = ?, type = ?, notes = ?, active = ?, availability_mode = ?, availability_weeks = ? WHERE id = ?',
+      name, rawPhone, type, b.notes || '', active, finalMode, finalWeeks, b.id
+    );
+  } else {
+    // الحفاظ على القاعدة المخزنة عند تحديثات العملاء القدامى (omitted updates)
+    await run(db,
+      'UPDATE khatibs SET name = ?, phone = ?, type = ?, notes = ?, active = ? WHERE id = ?',
+      name, rawPhone, type, b.notes || '', active, b.id
+    );
+  }
 
   if (isTrue_(existing.active) && !active) {
     await deactivateKhatib_(db, user, b.id);

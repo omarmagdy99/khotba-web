@@ -73,6 +73,30 @@
           </div>
         </div>
 
+        <div class="field" id="availabilityField">
+          <label>التوفر الشهري المتكرر *</label>
+          <div class="radio-row" style="margin-bottom:8px">
+            <label><input type="radio" name="availabilityMode" value="all" checked> كل جمعة (الافتراضي)</label>
+            <label><input type="radio" name="availabilityMode" value="custom"> جمع محددة من كل شهر</label>
+          </div>
+          <div id="customWeeksRow" style="display:none;padding:10px;background:#f8fafc;border:1px solid var(--line);border-radius:8px;margin-bottom:6px">
+            <div style="font-size:.88em;color:var(--muted);margin-bottom:6px">اختر الجمع المتاحة شهرياً:</div>
+            <div style="display:flex;gap:12px;flex-wrap:wrap">
+              <label style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" name="availWeek" value="1"> الأولى</label>
+              <label style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" name="availWeek" value="2"> الثانية</label>
+              <label style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" name="availWeek" value="3"> الثالثة</label>
+              <label style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" name="availWeek" value="4"> الرابعة</label>
+              <label style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" name="availWeek" value="5"> الخامسة</label>
+            </div>
+            <div id="availWeeksError" class="error-text" style="display:none;margin-top:6px">يجب اختيار جمعة واحدة على الأقل في النمط المخصص</div>
+          </div>
+          <div id="availabilitySummary" class="hint" style="color:var(--navy);font-weight:600;margin-bottom:4px">القاعدة: كل جمعة</div>
+          <div class="hint" style="font-size:.82em;color:var(--muted);line-height:1.4">
+            ℹ️ أساس التقويم: التبين هجري (أم القرى) — 15 مايو ميلادي.<br>
+            القاعدة استرشادية للتوزيع الشهري ولا تُسجل جاهزية أو تأكيد حضور، ولا ترتبط بالملاحظات النصية القديمة.
+          </div>
+        </div>
+
         <div class="field">
           <label for="khatibNotes">ملاحظات</label>
           <textarea id="khatibNotes" rows="2" placeholder="ملاحظات أو مؤهلات إضافية"></textarea>
@@ -120,6 +144,7 @@
   <div id="toast" class="toast"></div>
 
   <script src="config.js"></script>
+  <script src="assets/availability.js"></script>
   <script src="assets/app.js"></script>
   <script>
     renderNav('khatibs.html');
@@ -169,6 +194,44 @@
 
     function isTrue(val) {
       return String(val).toUpperCase() === 'TRUE';
+    }
+
+    function getSelectedAvailWeeks() {
+      var cbs = document.querySelectorAll('input[name="availWeek"]:checked');
+      var weeks = [];
+      for (var i = 0; i < cbs.length; i++) {
+        weeks.push(Number(cbs[i].value));
+      }
+      return weeks.sort(function (a, b) { return a - b; });
+    }
+
+    function updateAvailabilityUi() {
+      var radios = document.getElementsByName('availabilityMode');
+      var mode = 'all';
+      for (var i = 0; i < radios.length; i++) {
+        if (radios[i].checked) mode = radios[i].value;
+      }
+
+      var customRow = el('customWeeksRow');
+      var summaryEl = el('availabilitySummary');
+      var errEl = el('availWeeksError');
+
+      if (mode === 'all') {
+        if (customRow) customRow.style.display = 'none';
+        if (errEl) errEl.style.display = 'none';
+        if (summaryEl) summaryEl.textContent = 'القاعدة: كل جمعة';
+      } else {
+        if (customRow) customRow.style.display = 'block';
+        var weeks = getSelectedAvailWeeks();
+        if (weeks.length === 0) {
+          if (errEl) errEl.style.display = 'block';
+          if (summaryEl) summaryEl.textContent = 'القاعدة: لم يتم اختيار أي جمعة';
+        } else {
+          if (errEl) errEl.style.display = 'none';
+          var ruleText = KhatibAvailability.formatAvailabilityRule({ mode: 'custom', weeks: weeks });
+          if (summaryEl) summaryEl.textContent = 'القاعدة: ' + ruleText;
+        }
+      }
     }
 
     function getFilteredKhatibs() {
@@ -257,6 +320,15 @@
           typeBadge = '<span class="badge badge-primary">أساسي</span>';
         }
 
+        var availBadge = '';
+        if (k.availability && k.availability.mode === 'custom') {
+          var availLabel = KhatibAvailability.formatAvailabilityRule(k.availability, { short: true });
+          var fullAvailText = KhatibAvailability.formatAvailabilityRule(k.availability);
+          availBadge = ' <span class="badge" style="background:#e0e7ff;color:#3730a3;font-size:.78em" title="' + esc(fullAvailText) + '">🗓️ ' + esc(availLabel) + '</span>';
+        } else if (k.availability && k.availability.mode === 'invalid') {
+          availBadge = ' <span class="badge badge-off" style="font-size:.78em;background:#fee2e2;color:#991b1b" title="قاعدة التوفر المخزنة تالفة أو غير صالحة">⚠️ خطأ بالتوفر</span>';
+        }
+
         var phoneHtml = k.phone && k.phone.trim()
           ? '<span class="mono">' + esc(k.phone) + '</span>'
           : '<span class="missing">⚠️ ناقص</span>';
@@ -288,7 +360,7 @@
         }
 
         html += '<div class="table-row" style="grid-template-columns: ' + cols + '">' +
-          '<div data-label="الاسم"><a href="khatib-schedule.html?id=' + esc(k.id) + '" style="color:var(--navy);font-weight:600;text-decoration:none">' + esc(k.name) + '</a></div>' +
+          '<div data-label="الاسم"><a href="khatib-schedule.html?id=' + esc(k.id) + '" style="color:var(--navy);font-weight:600;text-decoration:none">' + esc(k.name) + '</a>' + availBadge + '</div>' +
           '<div data-label="رقم الهاتف">' + phoneHtml + '</div>' +
           '<div data-label="النوع">' + typeBadge + '</div>' +
           '<div data-label="المساجد المفضلة">' + prefsHtml + '</div>' +
@@ -363,6 +435,17 @@
       el('nameWarn').style.display = 'none';
       el('phoneError').style.display = 'none';
       hideFormError();
+
+      var aRadios = document.getElementsByName('availabilityMode');
+      for (var i = 0; i < aRadios.length; i++) {
+        aRadios[i].checked = (aRadios[i].value === 'all');
+      }
+      var wBoxes = document.getElementsByName('availWeek');
+      for (var j = 0; j < wBoxes.length; j++) {
+        wBoxes[j].checked = false;
+      }
+      updateAvailabilityUi();
+
       el('khatibModal').classList.add('show');
     }
 
@@ -381,6 +464,18 @@
       for (var i = 0; i < typeRadios.length; i++) {
         typeRadios[i].checked = (typeRadios[i].value === k.type);
       }
+
+      var avail = k.availability || { mode: 'all', weeks: [1, 2, 3, 4, 5] };
+      var aRadios = document.getElementsByName('availabilityMode');
+      for (var i = 0; i < aRadios.length; i++) {
+        aRadios[i].checked = (aRadios[i].value === (avail.mode === 'custom' ? 'custom' : 'all'));
+      }
+      var weekSet = new Set(avail.mode === 'custom' ? (avail.weeks || []) : []);
+      var wBoxes = document.getElementsByName('availWeek');
+      for (var j = 0; j < wBoxes.length; j++) {
+        wBoxes[j].checked = weekSet.has(Number(wBoxes[j].value));
+      }
+      updateAvailabilityUi();
 
       el('activeToggleField').style.display = 'block';
       el('nameWarn').style.display = 'none';
@@ -417,6 +512,16 @@
       el('nameWarn').style.display = hasDuplicate ? 'block' : 'none';
     });
 
+    // Wire availability changes
+    var availRadios = document.getElementsByName('availabilityMode');
+    for (var i = 0; i < availRadios.length; i++) {
+      availRadios[i].addEventListener('change', updateAvailabilityUi);
+    }
+    var weekCheckboxes = document.getElementsByName('availWeek');
+    for (var j = 0; j < weekCheckboxes.length; j++) {
+      weekCheckboxes[j].addEventListener('change', updateAvailabilityUi);
+    }
+
     // Form submission
     el('khatibForm').addEventListener('submit', async function (ev) {
       ev.preventDefault();
@@ -447,6 +552,25 @@
         return;
       }
 
+      var availMode = 'all';
+      var aRadios = document.getElementsByName('availabilityMode');
+      for (var i = 0; i < aRadios.length; i++) {
+        if (aRadios[i].checked) availMode = aRadios[i].value;
+      }
+
+      var availabilityPayload;
+      if (availMode === 'all') {
+        availabilityPayload = { mode: 'all', weeks: [1, 2, 3, 4, 5] };
+      } else {
+        var chosenWeeks = getSelectedAvailWeeks();
+        if (chosenWeeks.length === 0) {
+          el('availWeeksError').style.display = 'block';
+          showFormError('يجب اختيار جمعة واحدة على الأقل في النمط المخصص');
+          return;
+        }
+        availabilityPayload = { mode: 'custom', weeks: chosenWeeks };
+      }
+
       btn.disabled = true;
       btn.textContent = 'جاري الحفظ...';
 
@@ -455,7 +579,8 @@
         name: name,
         phone: phoneClean,
         type: typeVal,
-        notes: notes
+        notes: notes,
+        availability: availabilityPayload
       };
       if (isEditing) {
         payload.id = id;
