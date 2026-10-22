@@ -18,6 +18,7 @@ const htmlFiles = [
   'khatib-portal.html',
   'khatib-schedule.html',
   'free-khatibs.html',
+  'khatib-status-report.html',
   'khatibs.html',
   'mosques.html',
   'public.html',

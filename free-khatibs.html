@@ -12,7 +12,10 @@
   <div id="nav"></div>
   <div class="container">
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:16px">
-      <a href="schedule.html" class="btn btn-plain btn-sm" style="text-decoration:none;display:inline-flex;align-items:center;gap:4px">← رجوع للتوزيع</a>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <a id="backBtn" href="schedule.html" class="btn btn-plain btn-sm" style="text-decoration:none;display:inline-flex;align-items:center;gap:4px">← رجوع للتوزيع</a>
+        <a id="statusReportBtn" href="khatib-status-report.html" class="btn btn-plain btn-sm" style="text-decoration:none;display:inline-flex;align-items:center;gap:4px">📊 تقرير حالات الخطباء</a>
+      </div>
       <div style="display:flex;align-items:center;gap:8px">
         <label for="dateInput" style="font-weight:600;font-size:.9em;margin:0">التاريخ:</label>
         <input type="date" id="dateInput" style="padding:6px 12px;border:2px solid var(--line);border-radius:12px;font-family:inherit;font-size:.9em">
@@ -25,10 +28,21 @@
       <span class="total-badge" id="countBadge" style="display:none">0</span>
     </h1>
 
-    <div class="search-box">
-      <span class="search-icon">🔍</span>
-      <input type="text" id="searchInput" class="search-input" placeholder="ابحث باسم الخطيب...">
-      <button id="clearSearchBtn" class="clear-btn">✕</button>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px">
+      <div class="search-box" style="flex:1;min-width:220px;margin-bottom:0">
+        <span class="search-icon">🔍</span>
+        <input type="text" id="searchInput" class="search-input" placeholder="ابحث باسم الخطيب...">
+        <button id="clearSearchBtn" class="clear-btn">✕</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <label for="statusFilter" style="font-weight:600;font-size:.9em;margin:0;white-space:nowrap">الحالة:</label>
+        <select id="statusFilter" style="padding:8px 12px;border:2px solid var(--line);border-radius:12px;font-family:inherit;font-size:.9em;background:#fff">
+          <option value="">كل الحالات</option>
+          <option value="ready">مستعد</option>
+          <option value="excused">معتذر</option>
+          <option value="no_reply">لم يرد</option>
+        </select>
+      </div>
     </div>
 
     <div class="stats-bar" id="actionsBar" style="display:none">
@@ -48,6 +62,7 @@
 
   <script src="config.js"></script>
   <script src="assets/app.js"></script>
+  <script src="assets/khatib-status.js"></script>
   <script>
     renderNav('schedule.html');
 
@@ -63,6 +78,11 @@
       appReady();
     })();
 
+    function updateNavLinks() {
+      if (el('backBtn')) el('backBtn').href = 'schedule.html?date=' + encodeURIComponent(currentDate);
+      if (el('statusReportBtn')) el('statusReportBtn').href = 'khatib-status-report.html?date=' + encodeURIComponent(currentDate);
+    }
+
     function initDate() {
       var params = new URLSearchParams(window.location.search);
       currentDate = params.get('date') || '';
@@ -71,12 +91,14 @@
         currentDate = fridays[0] || todayIso();
       }
       el('dateInput').value = currentDate;
+      updateNavLinks();
     }
 
     el('dateInput').addEventListener('change', function () {
       var val = this.value;
       if (!val) return;
       currentDate = val;
+      updateNavLinks();
       var url = new URL(window.location.href);
       url.searchParams.set('date', val);
       window.history.replaceState({}, '', url.toString());
@@ -85,6 +107,7 @@
 
     var searchInput = el('searchInput');
     var clearBtn = el('clearSearchBtn');
+    var statusFilterEl = el('statusFilter');
 
     searchInput.addEventListener('input', function () {
       clearBtn.classList.toggle('show', !!this.value);
@@ -96,6 +119,10 @@
       clearBtn.classList.remove('show');
       applyFilter();
       searchInput.focus();
+    });
+
+    statusFilterEl.addEventListener('change', function () {
+      applyFilter();
     });
 
     async function loadData() {
@@ -129,48 +156,26 @@
 
         isGenerated = true;
 
-        var confirmedKhatibIds = new Set();
-        var excusedMosquesByKhatib = {};
-
-        (schedRes.rows || []).forEach(function (r) {
-          var kId = String(r.khatibId || '');
-          if (!kId) return;
-          if (r.status !== 'excused') {
-            confirmedKhatibIds.add(kId);
-          } else if (r.status === 'excused') {
-            var mName = r.mosque || ('مسجد ' + r.mosqueId);
-            if (!excusedMosquesByKhatib[kId]) {
-              excusedMosquesByKhatib[kId] = mName;
-            } else {
-              excusedMosquesByKhatib[kId] += '، ' + mName;
-            }
-          }
-        });
-
         var activeKhatibs = (khatibRes.khatibs || []).filter(function (k) {
           return k.active !== false && k.active !== 0;
         });
 
-        var readinessMap = schedRes.khatibReadiness || {};
         allFreeKhatibs = [];
         activeKhatibs.forEach(function (k) {
-          var kId = String(k.id || '');
-          if (confirmedKhatibIds.has(kId)) return;
-
-          var readiness = readinessMap[kId] || 'undecided';
-
-          var note = '';
-          if (excusedMosquesByKhatib[kId]) {
-            note = 'معتذر عن ' + excusedMosquesByKhatib[kId];
-          }
+          var state = KhatibStatus.resolveKhatibState(k, schedRes);
+          // الخطيب قيد التكليف غير المؤكد أو المؤكد لا يدخل في قائمة الخطباء غير المكلفين
+          if (!state.isFree) return;
 
           allFreeKhatibs.push({
-            id: k.id,
-            name: k.name || '',
-            phone: k.phone || '',
-            type: k.type || 'primary',
-            readiness: readiness,
-            note: note
+            id: state.id,
+            name: state.name,
+            phone: state.phone,
+            type: state.type,
+            statusKey: state.statusKey,
+            statusLabel: state.statusLabel,
+            statusBadgeHtml: state.statusBadgeHtml,
+            excuseDetail: state.excuseDetail,
+            exportStatusText: state.exportStatusText
           });
         });
 
@@ -191,12 +196,13 @@
     function applyFilter() {
       if (!isGenerated) return;
 
-      var query = (el('searchInput').value || '').trim();
-      currentFiltered = allFreeKhatibs.filter(function (k) {
-        return !query || matches(k.name, query);
-      });
+      var query = (searchInput.value || '').trim();
+      var statusFilter = statusFilterEl ? statusFilterEl.value : '';
 
-      el('statsCount').textContent = query
+      currentFiltered = KhatibStatus.filterKhatibs(allFreeKhatibs, query, statusFilter, matches);
+
+      var isFiltered = !!query || !!statusFilter;
+      el('statsCount').textContent = isFiltered
         ? (currentFiltered.length + ' من ' + allFreeKhatibs.length)
         : allFreeKhatibs.length;
 
@@ -209,7 +215,7 @@
       el('actionsBar').style.display = 'flex';
 
       if (currentFiltered.length === 0) {
-        showEmpty(el('results'), 'لا توجد نتائج مطابقة للبحث');
+        showEmpty(el('results'), 'لا توجد نتائج مطابقة للبحث أو الفلتر');
         return;
       }
 
@@ -222,7 +228,7 @@
           '<div>الخطيب</div>' +
           '<div>الموبايل</div>' +
           '<div>النوع</div>' +
-          '<div>ملاحظة</div>' +
+          '<div>الحالة</div>' +
         '</div>';
 
       rows.forEach(function (k) {
@@ -231,24 +237,18 @@
         var phoneHtml = k.phone && k.phone.trim()
           ? '<span class="mono" dir="ltr">' + esc(k.phone) + '</span>'
           : '<span class="muted">—</span>';
-        var noteParts = [];
-        if (k.readiness === 'ready') {
-          noteParts.push('<span class="badge badge-volunteer">🟢 مستعد للخطابة</span>');
-        } else if (k.readiness === 'excused') {
-          noteParts.push('<span class="badge badge-warn" style="background:#fee2e2;color:#991b1b">🚫 معتذر</span>');
-        } else {
-          noteParts.push('<span class="badge badge-off">⚪ لم يحدد</span>');
+
+        var statusBadges = [k.statusBadgeHtml];
+        if (k.excuseDetail) {
+          statusBadges.push('<span class="badge badge-warn">' + esc(k.excuseDetail) + '</span>');
         }
-        if (k.note) {
-          noteParts.push('<span class="badge badge-warn">' + esc(k.note) + '</span>');
-        }
-        var noteHtml = noteParts.join(' ');
+        var statusHtml = statusBadges.join(' ');
 
         html += '<div class="table-row" style="grid-template-columns: 2fr 1.5fr 1fr 2fr;">' +
           '<div data-label="الخطيب"><strong>' + esc(k.name) + '</strong></div>' +
           '<div data-label="الموبايل">' + phoneHtml + '</div>' +
           '<div data-label="النوع">' + typeBadge + '</div>' +
-          '<div data-label="ملاحظة">' + noteHtml + '</div>' +
+          '<div data-label="الحالة">' + statusHtml + '</div>' +
         '</div>';
       });
 
@@ -258,13 +258,13 @@
 
     function getExportData() {
       var title = 'الخطباء بدون خطبة — ' + formatDate(currentDate);
-      var headers = ['الخطيب', 'الموبايل', 'النوع', 'ملاحظة'];
+      var headers = ['الخطيب', 'الموبايل', 'النوع', 'الحالة'];
       var exportRows = currentFiltered.map(function (k) {
         return [
           k.name || '',
           k.phone || '',
           k.type === 'primary' ? 'أساسي' : 'متطوع',
-          k.note || ''
+          k.exportStatusText || k.statusLabel || ''
         ];
       });
       return { title: title, headers: headers, rows: exportRows };
