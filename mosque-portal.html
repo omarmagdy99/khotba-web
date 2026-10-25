@@ -1,0 +1,782 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>بوابة مسؤولي المساجد — أوقاف 15 مايو</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.rtl.min.css">
+  <link rel="stylesheet" href="assets/style.css">
+  <style>
+    .portal-card {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      padding: 24px;
+      margin-bottom: 20px;
+      box-shadow: 0 4px 18px rgba(0,0,0,0.05);
+      transition: all .25s ease;
+    }
+    .portal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--line);
+      margin-bottom: 20px;
+    }
+    .manager-name-badge {
+      font-size: 1.15em;
+      font-weight: 700;
+      color: var(--navy);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .mosque-card {
+      border: 2px solid #bae6fd;
+      background: #f0f9ff;
+      border-radius: 16px;
+      padding: 20px;
+      margin-bottom: 16px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.03);
+    }
+    .mosque-card.confirmed {
+      border-color: #bbf7d0;
+      background: #f0fdf4;
+    }
+    .mosque-card.excused {
+      border-color: #fecaca;
+      background: #fef2f2;
+    }
+    .mosque-title {
+      font-size: 1.3em;
+      font-weight: 700;
+      color: var(--navy);
+      margin-bottom: 6px;
+    }
+    .details-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      margin: 16px 0;
+      font-size: 0.95em;
+    }
+    .detail-item {
+      background: #fff;
+      padding: 10px 14px;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+    }
+    .detail-label {
+      color: var(--muted);
+      font-size: 0.82em;
+      margin-bottom: 2px;
+    }
+    .detail-val {
+      font-weight: 600;
+      color: #0f172a;
+    }
+    .action-row {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 18px;
+    }
+  </style>
+</head>
+<body data-no-loader="1">
+  <div class="container" style="max-width: 650px; margin-top: 20px;">
+    <!-- 1. شاشة إدخال رقم الهاتف -->
+    <div id="phoneSection" style="display: none;">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <div style="font-size: 3em; margin-bottom: 8px;">🕌</div>
+        <h1 style="font-size: 1.5em; margin-bottom: 6px;">بوابة مسؤولي المساجد</h1>
+        <p class="muted">أوقاف 15 مايو — متابعة خطيب الجمعة والتواصل معه</p>
+      </div>
+
+      <div class="portal-card">
+        <form id="phoneForm">
+          <div class="field mb-3">
+            <label for="phoneNumber" style="font-size: 0.95em; font-weight: 700;">رقم الهاتف المحمول</label>
+            <input type="tel" id="phoneNumber" dir="ltr" class="form-control" placeholder="01xxxxxxxxx" maxlength="11" required autocomplete="tel" style="font-size: 1.15em; text-align: center; letter-spacing: 2px;">
+            <div class="hint">أدخل رقم هاتفك المسجل كمسؤول للمسجد لدى إدارة الأوقاف (11 رقماً يبدأ بـ 01).</div>
+          </div>
+
+          <div id="phoneError" class="notice notice-err" style="display: none;"></div>
+
+          <button type="submit" class="btn btn-ok w-100" id="phoneSubmitBtn" style="padding: 12px; font-size: 1.05em;">
+            متابعة ←
+          </button>
+        </form>
+      </div>
+
+      <div style="text-align: center; font-size: 0.88em; color: var(--muted); margin-top: 16px;">
+        إذا تغير رقم هاتفك أو واجهتك مشكلة في الدخول، يرجى مراجعة مسؤول التنسيق بإدارة الأوقاف.
+      </div>
+    </div>
+
+    <!-- 2. شاشة تعيين كلمة المرور لأول مرة (needs_setup) -->
+    <div id="setupSection" style="display: none;">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <div style="font-size: 3em; margin-bottom: 8px;">🔑</div>
+        <h1 style="font-size: 1.5em; margin-bottom: 6px;">تعيين كلمة المرور لأول مرة</h1>
+        <p class="muted" id="setupPhoneHeader">مرحباً بك! يرجى اختيار كلمة مرور لحسابك</p>
+      </div>
+
+      <div class="portal-card">
+        <form id="setupForm">
+          <div class="field mb-3">
+            <label for="setupPassword" style="font-size: 0.95em; font-weight: 700;">كلمة المرور الجديدة (8 خانات على الأقل) *</label>
+            <div class="input-group">
+              <input type="password" id="setupPassword" class="form-control" minlength="8" required autocomplete="new-password">
+              <button type="button" class="btn btn-outline-secondary" id="setupTogglePasswordBtn" onclick="togglePassword('setupPassword', this)" title="إظهار/إخفاء" aria-label="إظهار أو إخفاء كلمة المرور">👁️</button>
+            </div>
+          </div>
+
+          <div class="field mb-3">
+            <label for="setupConfirmPassword" style="font-size: 0.95em; font-weight: 700;">تأكيد كلمة المرور *</label>
+            <div class="input-group">
+              <input type="password" id="setupConfirmPassword" class="form-control" minlength="8" required autocomplete="new-password">
+              <button type="button" class="btn btn-outline-secondary" id="setupToggleConfirmBtn" onclick="togglePassword('setupConfirmPassword', this)" title="إظهار/إخفاء" aria-label="إظهار أو إخفاء تأكيد كلمة المرور">👁️</button>
+            </div>
+          </div>
+
+          <div id="setupError" class="notice notice-err" style="display: none;"></div>
+
+          <button type="submit" class="btn btn-ok w-100" id="setupSubmitBtn" style="padding: 12px; font-size: 1.05em;">
+            حفظ كلمة المرور والدخول ←
+          </button>
+
+          <button type="button" class="btn btn-plain w-100 mt-2" id="setupBackBtn">
+            ← العودة لتغيير رقم الهاتف
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <!-- 3. شاشة تسجيل الدخول بكلمة المرور (has_password) -->
+    <div id="passwordSection" style="display: none;">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <div style="font-size: 3em; margin-bottom: 8px;">🔒</div>
+        <h1 style="font-size: 1.5em; margin-bottom: 6px;">تسجيل الدخول</h1>
+        <p class="muted" id="passwordPhoneHeader">أدخل كلمة المرور الخاصة برقمك</p>
+      </div>
+
+      <div class="portal-card">
+        <form id="passwordForm">
+          <div class="field mb-3">
+            <label for="loginPassword" style="font-size: 0.95em; font-weight: 700;">كلمة المرور *</label>
+            <div class="input-group">
+              <input type="password" id="loginPassword" class="form-control" required autocomplete="current-password">
+              <button type="button" class="btn btn-outline-secondary" id="passwordToggleBtn" onclick="togglePassword('loginPassword', this)" title="إظهار/إخفاء" aria-label="إظهار أو إخفاء كلمة المرور">👁️</button>
+            </div>
+          </div>
+
+          <div id="passwordError" class="notice notice-err" style="display: none;"></div>
+
+          <button type="submit" class="btn btn-ok w-100" id="loginSubmitBtn" style="padding: 12px; font-size: 1.05em;">
+            دخول إلى البوابة ←
+          </button>
+
+          <div class="text-center mt-3 pt-2">
+            <a href="#" id="forgotPasswordLink" class="text-decoration-none small text-primary fw-bold">نسيت كلمة المرور؟</a>
+          </div>
+
+          <button type="button" class="btn btn-plain w-100 mt-2" id="passwordBackBtn">
+            ← العودة لتغيير رقم الهاتف
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <!-- 4. شاشة طلب إعادة ضبط كلمة المرور (Forgot Password Request) -->
+    <div id="forgotSection" style="display: none;">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <div style="font-size: 3em; margin-bottom: 8px;">📩</div>
+        <h1 style="font-size: 1.5em; margin-bottom: 6px;">إعادة ضبط كلمة المرور</h1>
+        <p class="muted" id="forgotPhoneHeader">سيتم إرسال رمز التحقق عبر تيليجرام</p>
+      </div>
+
+      <div class="portal-card">
+        <p style="font-size: 0.95em; line-height: 1.6; color: var(--navy); margin-bottom: 16px;">
+          لإعادة ضبط كلمة المرور، سنرسل رمز تحقق مكوّناً من 6 أرقام إلى حسابك في تيليجرام المرتبط برقم هاتفك.
+        </p>
+
+        <div id="telegramHelpBox" style="display: none;"></div>
+        <div id="forgotError" class="notice notice-err" style="display: none;"></div>
+
+        <button type="button" class="btn btn-ok w-100" id="requestResetBtn" style="padding: 12px; font-size: 1.05em;">
+          إرسال رمز التحقق عبر تيليجرام
+        </button>
+
+        <button type="button" class="btn btn-plain w-100 mt-2" id="forgotBackBtn">
+          ← العودة لتسجيل الدخول
+        </button>
+      </div>
+    </div>
+
+    <!-- 5. شاشة إدخال رمز التحقق وكلمة المرور الجديدة (Confirm Reset) -->
+    <div id="resetSection" style="display: none;">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <div style="font-size: 3em; margin-bottom: 8px;">📲</div>
+        <h1 style="font-size: 1.5em; margin-bottom: 6px;">تأكيد إعادة ضبط كلمة المرور</h1>
+        <p class="muted">أدخل الرمز المستلم عبر تيليجرام وكلمة المرور الجديدة</p>
+      </div>
+
+      <div class="portal-card">
+        <form id="resetConfirmForm">
+          <div class="field mb-3">
+            <label for="resetCode" style="font-size: 0.95em; font-weight: 700;">رمز التحقق (6 أرقام) *</label>
+            <input type="text" id="resetCode" dir="ltr" class="form-control" maxlength="6" pattern="\d{6}" placeholder="123456" required style="font-size: 1.25em; letter-spacing: 4px; text-align: center; font-weight: 700;">
+            <div class="hint">الرمز المكون من 6 أرقام المرسل إليك عبر تيليجرام.</div>
+          </div>
+
+          <div class="field mb-3">
+            <label for="resetPassword" style="font-size: 0.95em; font-weight: 700;">كلمة المرور الجديدة (8 خانات على الأقل) *</label>
+            <div class="input-group">
+              <input type="password" id="resetPassword" class="form-control" minlength="8" required autocomplete="new-password">
+              <button type="button" class="btn btn-outline-secondary" onclick="togglePassword('resetPassword', this)" title="إظهار/إخفاء" aria-label="إظهار أو إخفاء كلمة المرور">👁️</button>
+            </div>
+          </div>
+
+          <div class="field mb-3">
+            <label for="resetConfirmPassword" style="font-size: 0.95em; font-weight: 700;">تأكيد كلمة المرور الجديدة *</label>
+            <div class="input-group">
+              <input type="password" id="resetConfirmPassword" class="form-control" minlength="8" required autocomplete="new-password">
+              <button type="button" class="btn btn-outline-secondary" onclick="togglePassword('resetConfirmPassword', this)" title="إظهار/إخفاء" aria-label="إظهار أو إخفاء تأكيد كلمة المرور">👁️</button>
+            </div>
+          </div>
+
+          <div id="resetError" class="notice notice-err" style="display: none;"></div>
+
+          <button type="submit" class="btn btn-ok w-100" id="resetSubmitBtn" style="padding: 12px; font-size: 1.05em;">
+            تأكيد وتغيير كلمة المرور والدخول ←
+          </button>
+
+          <button type="button" class="btn btn-plain w-100 mt-2" id="resendCodeBtn">
+            لم يصلك الرمز؟ إعادة الإرسال
+          </button>
+
+          <button type="button" class="btn btn-plain w-100 mt-1" id="resetBackBtn">
+            ← إلغاء والعودة
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <!-- 6. شاشة لوحة تحكم مسؤول المسجد (Dashboard) -->
+    <div id="dashboardSection" style="display: none;">
+      <div class="portal-card">
+        <div class="portal-header">
+          <div class="manager-name-badge">
+            <span>🕌</span>
+            <span id="managerPhoneText">مسؤول المسجد</span>
+            <span class="badge badge-primary" style="font-size: 0.75em;">مسؤول</span>
+          </div>
+          <div class="d-flex align-items-center gap-2">
+            <button type="button" class="btn btn-plain btn-sm" id="refreshBtn">
+              🔄 تحديث
+            </button>
+            <button type="button" class="btn btn-plain btn-sm" id="logoutBtn" style="color: var(--danger); text-decoration: none;">
+              تسجيل خروج
+            </button>
+          </div>
+        </div>
+
+        <div class="mb-3 p-3 rounded-3" style="background: #f8fafc; border: 1px solid var(--line);">
+          <label style="font-weight: 600; font-size: 0.85em; color: var(--muted); display: block; margin-bottom: 4px;">الجمعة الحالية:</label>
+          <div style="font-size: 1.2em; font-weight: 700; color: var(--navy);" id="fridayDateText">📅 ...</div>
+        </div>
+
+        <!-- بطاقات المساجد التابعة للمسؤول -->
+        <div id="mosquesContainer">
+          <div class="state"><div class="spinner"></div><p>جاري تحميل البيانات...</p></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="config.js"></script>
+  <script src="assets/app.js"></script>
+  <script>
+    var currentPhone = '';
+    var mosqueTokenKey = 'awqaf_mosque_token_' + REGION_ID;
+    var currentToken = localStorage.getItem(mosqueTokenKey) || '';
+
+    function el(id) {
+      return document.getElementById(id);
+    }
+
+    function hideAllSections() {
+      ['phoneSection', 'setupSection', 'passwordSection', 'forgotSection', 'resetSection', 'dashboardSection'].forEach(function (id) {
+        var s = el(id);
+        if (s) s.style.display = 'none';
+      });
+    }
+
+    function showPhoneSection() {
+      hideAllSections();
+      el('phoneSection').style.display = 'block';
+      hideError('phoneError');
+      el('phoneNumber').focus();
+    }
+
+    function showSetupSection() {
+      hideAllSections();
+      el('setupSection').style.display = 'block';
+      hideError('setupError');
+      if (el('setupPhoneHeader')) {
+        el('setupPhoneHeader').textContent = 'مرحباً بك! يرجى اختيار كلمة مرور لحسابك (' + currentPhone + ')';
+      }
+      el('setupPassword').value = '';
+      el('setupConfirmPassword').value = '';
+      el('setupPassword').focus();
+    }
+
+    function showPasswordSection() {
+      hideAllSections();
+      el('passwordSection').style.display = 'block';
+      hideError('passwordError');
+      if (el('passwordPhoneHeader')) {
+        el('passwordPhoneHeader').textContent = 'أدخل كلمة المرور الخاصة برقم: ' + currentPhone;
+      }
+      el('loginPassword').value = '';
+      el('loginPassword').focus();
+    }
+
+    function showForgotSection() {
+      hideAllSections();
+      el('forgotSection').style.display = 'block';
+      hideError('forgotError');
+      el('telegramHelpBox').style.display = 'none';
+      if (el('forgotPhoneHeader')) {
+        el('forgotPhoneHeader').textContent = 'إعادة ضبط كلمة المرور لرقم: ' + currentPhone;
+      }
+    }
+
+    function showResetSection() {
+      hideAllSections();
+      el('resetSection').style.display = 'block';
+      hideError('resetError');
+      el('resetCode').value = '';
+      el('resetPassword').value = '';
+      el('resetConfirmPassword').value = '';
+      el('resetCode').focus();
+    }
+
+    function showDashboardLoading() {
+      hideAllSections();
+      el('dashboardSection').style.display = 'block';
+      el('managerPhoneText').textContent = currentPhone || 'مسؤول المسجد';
+      el('mosquesContainer').innerHTML = '<div class="state"><div class="spinner"></div><p>جاري تحميل البيانات...</p></div>';
+    }
+
+    function showDashboard() {
+      hideAllSections();
+      el('dashboardSection').style.display = 'block';
+      el('managerPhoneText').textContent = currentPhone || 'مسؤول المسجد';
+      loadSchedule();
+    }
+
+    function showError(boxId, msg) {
+      var box = el(boxId);
+      if (!box) return;
+      box.textContent = msg;
+      box.style.display = 'block';
+    }
+
+    function hideError(boxId) {
+      var box = el(boxId);
+      if (!box) return;
+      box.textContent = '';
+      box.style.display = 'none';
+    }
+
+    function setLoading(btnId, loading, text) {
+      var btn = el(btnId);
+      if (!btn) return;
+      btn.disabled = loading;
+      if (text) btn.textContent = text;
+    }
+
+    window.togglePassword = function (inputId, btn) {
+      var input = el(inputId);
+      if (!input) return;
+      if (input.type === 'password') {
+        input.type = 'text';
+        if (btn) btn.textContent = '🔒';
+      } else {
+        input.type = 'password';
+        if (btn) btn.textContent = '👁️';
+      }
+    };
+
+    window.copyPhone = function (phone) {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(phone).then(function () {
+          toast('تم نسخ رقم الهاتف بنجاح 📋', 'ok');
+        }).catch(function () {
+          toast('الرقم: ' + phone, 'ok');
+        });
+      } else {
+        toast('الرقم: ' + phone, 'ok');
+      }
+    };
+
+    // ─────────────────────────────────────────── التهيئة التلقائية
+    (async function init() {
+      if (currentToken) {
+        showDashboardLoading();
+        try {
+          var me = await api('mosqueWhoami', { token: currentToken });
+          currentPhone = me.phone || '';
+          showDashboard();
+          return;
+        } catch (e) {
+          localStorage.removeItem(mosqueTokenKey);
+          currentToken = '';
+          currentPhone = '';
+        }
+      }
+      showPhoneSection();
+    })();
+
+    // ─────────────────────────────────────────── 1. التحقق من الهاتف
+    el('phoneForm').addEventListener('submit', async function (ev) {
+      ev.preventDefault();
+      var phone = el('phoneNumber').value.trim();
+      if (!/^01\d{9}$/.test(phone)) {
+        showError('phoneError', 'يرجى إدخال رقم هاتف محمول مصري صحيح (11 رقماً يبدأ بـ 01)');
+        el('phoneNumber').focus();
+        return;
+      }
+
+      setLoading('phoneSubmitBtn', true, 'جاري التحقق...');
+      hideError('phoneError');
+
+      try {
+        var res = await api('mosquePhoneCheck', { phone: phone });
+        currentPhone = phone;
+        if (res.status === 'needs_setup') {
+          showSetupSection();
+        } else {
+          showPasswordSection();
+        }
+      } catch (err) {
+        var msg = err.code === 'NOT_FOUND'
+          ? 'رقم الهاتف غير مسجل كمسؤول لأي مسجد نشط. يرجى مراجعة إدارة الأوقاف.'
+          : (err.message || 'حدث خطأ أثناء التحقق من الرقم');
+        showError('phoneError', msg);
+        el('phoneNumber').focus();
+      } finally {
+        setLoading('phoneSubmitBtn', false, 'متابعة ←');
+      }
+    });
+
+    // ─────────────────────────────────────────── 2. تعيين كلمة المرور لأول مرة
+    el('setupForm').addEventListener('submit', async function (ev) {
+      ev.preventDefault();
+      var pass = el('setupPassword').value;
+      var confirm = el('setupConfirmPassword').value;
+
+      if (pass.length < 8) {
+        showError('setupError', 'كلمة المرور يجب أن لا تقل عن 8 أحرف');
+        el('setupPassword').focus();
+        return;
+      }
+      if (pass !== confirm) {
+        showError('setupError', 'كلمتا المرور غير متطابقتين');
+        el('setupConfirmPassword').focus();
+        return;
+      }
+
+      setLoading('setupSubmitBtn', true, 'جاري حفظ كلمة المرور...');
+      hideError('setupError');
+
+      try {
+        var res = await api('mosqueSetPassword', { phone: currentPhone, password: pass });
+        currentToken = res.token;
+        localStorage.setItem(mosqueTokenKey, currentToken);
+        toast('تم تعيين كلمة المرور بنجاح!', 'ok');
+        showDashboard();
+      } catch (err) {
+        showError('setupError', err.message || 'حدث خطأ أثناء حفظ كلمة المرور');
+      } finally {
+        setLoading('setupSubmitBtn', false, 'حفظ كلمة المرور والدخول ←');
+      }
+    });
+
+    el('setupBackBtn').addEventListener('click', function () {
+      showPhoneSection();
+    });
+
+    // ─────────────────────────────────────────── 3. تسجيل الدخول بكلمة المرور
+    el('passwordForm').addEventListener('submit', async function (ev) {
+      ev.preventDefault();
+      var pass = el('loginPassword').value;
+      if (!pass) {
+        showError('passwordError', 'يرجى إدخال كلمة المرور');
+        el('loginPassword').focus();
+        return;
+      }
+
+      setLoading('loginSubmitBtn', true, 'جاري تسجيل الدخول...');
+      hideError('passwordError');
+
+      try {
+        var res = await api('mosqueLogin', { phone: currentPhone, password: pass });
+        currentToken = res.token;
+        localStorage.setItem(mosqueTokenKey, currentToken);
+        showDashboard();
+      } catch (err) {
+        var msg = err.code === 'BAD_CREDENTIALS'
+          ? 'كلمة المرور غير صحيحة. يرجى التأكد والمحاولة مرة أخرى.'
+          : (err.message || 'حدث خطأ أثناء تسجيل الدخول');
+        showError('passwordError', msg);
+        el('loginPassword').focus();
+      } finally {
+        setLoading('loginSubmitBtn', false, 'دخول إلى البوابة ←');
+      }
+    });
+
+    el('passwordBackBtn').addEventListener('click', function () {
+      showPhoneSection();
+    });
+
+    // ─────────────────────────────────────────── 4. نسيت كلمة المرور
+    el('forgotPasswordLink').addEventListener('click', function (ev) {
+      ev.preventDefault();
+      showForgotSection();
+      requestReset();
+    });
+
+    el('requestResetBtn').addEventListener('click', function () {
+      requestReset();
+    });
+
+    el('forgotBackBtn').addEventListener('click', function () {
+      showPasswordSection();
+    });
+
+    async function requestReset() {
+      hideError('forgotError');
+      el('telegramHelpBox').style.display = 'none';
+      setLoading('requestResetBtn', true, 'جاري إرسال رمز التحقق...');
+
+      try {
+        var res = await api('mosqueRequestReset', { phone: currentPhone });
+        if (res && res.sent) {
+          toast('تم إرسال رمز التحقق إلى حسابك في تيليجرام ✈️', 'ok');
+          showResetSection();
+        }
+      } catch (err) {
+        if (err.code === 'TELEGRAM_NOT_LINKED') {
+          var botUsername = (err.details && err.details.botUsername) ? err.details.botUsername : '';
+          var botLink = botUsername ? ('https://t.me/' + botUsername) : '';
+          var instructions = '<div class="alert alert-warning mt-3 text-start" style="font-size:0.92em;line-height:1.7;">' +
+            '<strong>⚠️ حسابك غير مربوط ببوت التيليجرام:</strong><br>' +
+            'لإعادة ضبط كلمة المرور، يرجى ربط رقم هاتفك أولاً باتباع الخطوات التالية:' +
+            '<ol class="mt-2 mb-2 pe-3">' +
+              '<li>افتح بوت التيليجرام: ' + (botLink ? ('<a href="' + esc(botLink) + '" target="_blank" rel="noopener" class="fw-bold" style="color:var(--navy)">' + esc('@' + botUsername) + '</a>') : 'بوت أوقاف') + '</li>' +
+              '<li>اضغط على زر <strong>بدء (Start)</strong> داخل المحادثة.</li>' +
+              '<li>اضغط على زر <strong>مشاركة رقم هاتفي (Share Contact)</strong> لإثبات ملكية الرقم.</li>' +
+              '<li>بعد إتمام الربط، ارجع إلى هذه الصفحة واضغط "إعادة المحاولة".</li>' +
+            '</ol>' +
+            '</div>';
+          el('telegramHelpBox').innerHTML = instructions;
+          el('telegramHelpBox').style.display = 'block';
+          showError('forgotError', 'رقم هاتفك غير مربوط ببوت التيليجرام. يرجى اتباع التعليمات أدناه ثم إعادة المحاولة.');
+        } else if (err.code === 'TELEGRAM_UNAVAILABLE') {
+          showError('forgotError', 'خدمة إعادة ضبط كلمة المرور عبر تيليجرام غير متاحة حالياً. يرجى مراجعة إدارة الأوقاف.');
+        } else {
+          showError('forgotError', err.message || 'تعذّر إرسال رمز التحقق. يرجى المحاولة لاحقاً.');
+        }
+      } finally {
+        setLoading('requestResetBtn', false, 'إرسال رمز التحقق عبر تيليجرام');
+      }
+    }
+
+    // ─────────────────────────────────────────── 5. تأكيد الرمز وتعيين كلمة المرور الجديدة
+    el('resetConfirmForm').addEventListener('submit', async function (ev) {
+      ev.preventDefault();
+      var code = el('resetCode').value.trim();
+      var pass = el('resetPassword').value;
+      var confirm = el('resetConfirmPassword').value;
+
+      if (!code) {
+        showError('resetError', 'يرجى إدخال رمز التحقق');
+        el('resetCode').focus();
+        return;
+      }
+      if (pass.length < 8) {
+        showError('resetError', 'كلمة المرور يجب أن لا تقل عن 8 أحرف');
+        el('resetPassword').focus();
+        return;
+      }
+      if (pass !== confirm) {
+        showError('resetError', 'كلمتا المرور غير متطابقتين');
+        el('resetConfirmPassword').focus();
+        return;
+      }
+
+      setLoading('resetSubmitBtn', true, 'جاري تأكيد الرمز وتعيين كلمة المرور...');
+      hideError('resetError');
+
+      try {
+        var res = await api('mosqueConfirmReset', {
+          phone: currentPhone,
+          code: code,
+          password: pass
+        });
+        currentToken = res.token;
+        localStorage.setItem(mosqueTokenKey, currentToken);
+        toast('تمت إعادة ضبط كلمة المرور بنجاح!', 'ok');
+        showDashboard();
+      } catch (err) {
+        var msg = err.code === 'BAD_CODE'
+          ? 'رمز التحقق غير صحيح أو انتهت صلاحيته. يرجى التأكد أو طلب رمز جديد.'
+          : (err.message || 'حدث خطأ أثناء تأكيد الرمز');
+        showError('resetError', msg);
+      } finally {
+        setLoading('resetSubmitBtn', false, 'تأكيد وتغيير كلمة المرور والدخول ←');
+      }
+    });
+
+    el('resendCodeBtn').addEventListener('click', function () {
+      showForgotSection();
+      requestReset();
+    });
+
+    el('resetBackBtn').addEventListener('click', function () {
+      showPasswordSection();
+    });
+
+    // ─────────────────────────────────────────── 6. لوحة التحكم والجدول
+    el('logoutBtn').addEventListener('click', async function () {
+      var tok = currentToken;
+      localStorage.removeItem(mosqueTokenKey);
+      currentToken = '';
+      currentPhone = '';
+      showPhoneSection();
+      if (tok) {
+        try { await api('mosqueLogout', { token: tok }); } catch (e) {}
+      }
+    });
+
+    el('refreshBtn').addEventListener('click', function () {
+      loadSchedule();
+    });
+
+    async function loadSchedule() {
+      var container = el('mosquesContainer');
+      container.innerHTML = '<div class="state"><div class="spinner"></div><p>جاري تحميل البيانات...</p></div>';
+
+      try {
+        var data = await api('mosqueGetSchedule', { token: currentToken });
+        renderSchedule(data);
+      } catch (err) {
+        if (err.code === 'UNAUTHENTICATED') {
+          localStorage.removeItem(mosqueTokenKey);
+          currentToken = '';
+          currentPhone = '';
+          showPhoneSection();
+          return;
+        }
+        container.innerHTML = '<div class="state error"><p>' + esc(err.message || 'حدث خطأ أثناء تحميل البيانات') + '</p>' +
+          '<button type="button" class="btn btn-sm btn-plain" onclick="loadSchedule()">إعادة المحاولة</button></div>';
+      }
+    }
+
+    function renderSchedule(data) {
+      var dateBox = el('fridayDateText');
+      if (dateBox) {
+        dateBox.textContent = 'جمعة ' + formatDate(data.date);
+      }
+
+      var container = el('mosquesContainer');
+      var mosques = data.mosques || [];
+      if (mosques.length === 0) {
+        container.innerHTML = '<div class="state"><span class="state-icon">🕌</span><p>لا توجد مساجد مسجلة لرقم هاتفك حالياً.</p></div>';
+        return;
+      }
+
+      var areaWord = (typeof REGION_ID !== 'undefined' && REGION_ID === 'tebeen') ? 'المنطقة' : 'المجاورة';
+
+      var html = mosques.map(function (m) {
+        var statusBadge = '';
+        var cardClass = 'mosque-card';
+        if (m.status === 'confirmed') {
+          cardClass += ' confirmed';
+          statusBadge = '<span class="badge badge-volunteer" style="font-size:0.9em">✅ مؤكد الحضور</span>';
+        } else if (m.status === 'excused') {
+          cardClass += ' excused';
+          statusBadge = '<span class="badge badge-excused" style="font-size:0.9em">⚠️ معتذر</span>';
+        } else {
+          statusBadge = '<span class="badge badge-off" style="font-size:0.9em">⏳ لم يتم التأكيد بعد</span>';
+        }
+
+        var khatibSection = '';
+        if (m.khatib && m.khatib.name) {
+          var phone = m.khatib.phone || '';
+          khatibSection =
+            '<div class="detail-item" style="grid-column: 1 / -1">' +
+              '<div class="detail-label">خطيب الجمعة المكلف</div>' +
+              '<div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mt-1">' +
+                '<div class="detail-val" style="font-size:1.05em">🎙️ الشيخ ' + esc(m.khatib.name) + '</div>' +
+                (phone ? (
+                  '<div class="d-flex align-items-center gap-2">' +
+                    '<a href="tel:' + esc(phone) + '" class="btn btn-sm btn-outline-primary" style="padding:4px 12px;font-weight:600">' +
+                      '📞 ' + esc(phone) +
+                    '</a>' +
+                    '<button type="button" class="btn btn-sm btn-plain" onclick="copyPhone(\'' + esc(phone) + '\')">' +
+                      '📋 نسخ الرقم' +
+                    '</button>' +
+                  '</div>'
+                ) : '') +
+              '</div>' +
+            '</div>';
+        } else {
+          khatibSection =
+            '<div class="detail-item" style="grid-column: 1 / -1">' +
+              '<div class="detail-label">خطيب الجمعة المكلف</div>' +
+              '<div class="detail-val text-muted" style="font-weight:normal">لم يتم تعيين خطيب بعد</div>' +
+            '</div>';
+        }
+
+        return '<div class="' + cardClass + '">' +
+          '<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px">' +
+            '<div>' +
+              '<div class="mosque-title">🕌 ' + esc(m.name) + '</div>' +
+            '</div>' +
+            '<div>' + statusBadge + '</div>' +
+          '</div>' +
+
+          '<div class="details-grid">' +
+            '<div class="detail-item">' +
+              '<div class="detail-label">' + esc(areaWord) + '</div>' +
+              '<div class="detail-val">📍 ' + esc(m.mujawra || '—') + '</div>' +
+            '</div>' +
+            '<div class="detail-item">' +
+              '<div class="detail-label">تاريخ الجمعة</div>' +
+              '<div class="detail-val">📅 ' + esc(formatDate(data.date)) + '</div>' +
+            '</div>' +
+            (m.address ? (
+              '<div class="detail-item" style="grid-column: 1 / -1">' +
+                '<div class="detail-label">العنوان بالتفصيل</div>' +
+                '<div class="detail-val">' + esc(m.address) + '</div>' +
+              '</div>'
+            ) : '') +
+            khatibSection +
+          '</div>' +
+        '</div>';
+      }).join('');
+
+      container.innerHTML = html;
+    }
+  </script>
+</body>
+</html>

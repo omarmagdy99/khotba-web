@@ -58,6 +58,12 @@
         </div>
 
         <div class="field">
+          <label for="managerPhone">رقم هاتف المسؤول</label>
+          <input type="tel" id="managerPhone" dir="ltr" maxlength="11" placeholder="01xxxxxxxxx">
+          <div class="hint">رقم محمول مصري (11 رقماً يبدأ بـ 01) أو يُترك فارغاً.</div>
+        </div>
+
+        <div class="field">
           <label for="permanentKhatibId">الخطيب الثابت</label>
           <select id="permanentKhatibId">
             <option value="">— بدون خطيب ثابت —</option>
@@ -166,7 +172,8 @@
       var query = el('searchInput').value.trim();
       if (!query) return allMosques.slice();
       return allMosques.filter(function (m) {
-        return matches(m.name, query) || matches(m.mujawra, query);
+        var phone = m.managerPhone || m.manager_phone || '';
+        return matches(m.name, query) || matches(m.mujawra, query) || (phone && phone.includes(query));
       });
     }
 
@@ -191,13 +198,14 @@
       allKhatibs.forEach(function (k) { khatibMap[k.id] = k.name; });
       var activeCount = allMosques.filter(function (m) { return isTrue(m.active); }).length;
 
-      var cols = canEdit() ? '76px 2fr 1.2fr 2fr 1fr 1.5fr;' : '56px 2fr 1.2fr 2fr 1fr;';
+      var cols = canEdit() ? '76px 1.8fr 1fr 1.4fr 1.6fr 0.9fr 1.5fr;' : '56px 1.8fr 1fr 1.4fr 1.6fr 0.9fr;';
       var html = '<div class="table-container">' +
         '<div class="table-header" style="grid-template-columns: ' + cols + '">' +
           '<div title="رقم المسجد — غيّره عشان تغيّر الترتيب في كل الشاشات">#</div>' +
           '<div>اسم المسجد</div>' +
           '<div>المجاورة</div>' +
           '<div>الخطيب الثابت</div>' +
+          '<div>مسؤول المسجد</div>' +
           '<div>الحالة</div>' +
           (canEdit() ? '<div>إجراءات</div>' : '') +
         '</div>';
@@ -212,11 +220,41 @@
             ' data-id="' + esc(m.id) + '" data-old="' + esc(m.sortOrder || '') + '" title="غيّر الرقم واضغط Enter">'
           : '<span class="mosque-no">' + esc(active ? (m.sortOrder || '') : '—') + '</span>';
 
+        var phone = m.managerPhone || m.manager_phone || '';
+        var managerCell = '';
+        if (phone) {
+          var badges = [];
+          if (m.managerHasPassword) {
+            badges.push('<span class="badge badge-volunteer" style="font-size:0.75em">كلمة مرور مُعيّنة</span>');
+          } else {
+            badges.push('<span class="badge badge-off" style="font-size:0.75em">بدون كلمة مرور</span>');
+          }
+          if (m.managerTelegramLinked) {
+            badges.push('<span class="badge badge-primary" style="font-size:0.75em">تيليجرام مفعل</span>');
+          } else {
+            badges.push('<span class="badge badge-off" style="font-size:0.75em">تيليجرام غير مربوط</span>');
+          }
+          var resetBtn = '';
+          if (canEdit()) {
+            resetBtn = '<button type="button" class="btn btn-sm btn-plain" style="font-size:0.75em;padding:2px 8px;margin-top:4px" onclick="resetManagerPassword(\'' + esc(phone) + '\')">' +
+              '🔑 إعادة ضبط كلمة المرور' +
+            '</button>';
+          }
+          managerCell = '<div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start">' +
+            '<span dir="ltr" style="font-weight:600">' + esc(phone) + '</span>' +
+            '<div style="display:flex;gap:4px;flex-wrap:wrap">' + badges.join('') + '</div>' +
+            resetBtn +
+          '</div>';
+        } else {
+          managerCell = '<span class="muted">—</span>';
+        }
+
         html += '<div class="table-row" style="grid-template-columns: ' + cols + '">' +
           '<div data-label="رقم المسجد">' + noCell + '</div>' +
           '<div data-label="اسم المسجد"><strong>' + esc(m.name) + '</strong></div>' +
           '<div data-label="المجاورة"><span class="area-badge">' + esc(m.mujawra) + '</span></div>' +
           '<div data-label="الخطيب الثابت">' + (permName ? esc(permName) : '<span class="muted">غير محدد</span>') + '</div>' +
+          '<div data-label="مسؤول المسجد">' + managerCell + '</div>' +
           '<div data-label="الحالة">' +
             (active ? '<span class="badge badge-volunteer">نشط</span>' : '<span class="badge badge-off">غير نشط</span>') +
           '</div>' +
@@ -288,6 +326,7 @@
       el('modalTitle').textContent = 'إضافة مسجد جديد';
       el('mosqueForm').reset();
       el('mosqueId').value = '';
+      el('managerPhone').value = '';
       if (_permKhatibTomSelect) _permKhatibTomSelect.setValue('');
       el('activeToggleField').style.display = 'none';
       el('nameWarn').style.display = 'none';
@@ -304,6 +343,7 @@
       el('mosqueName').value = m.name || '';
       el('mosqueMujawra').value = m.mujawra || '';
       el('mosqueAddress').value = m.address || '';
+      el('managerPhone').value = m.managerPhone || m.manager_phone || '';
       var val = m.permanent_khatib_id || m.permanentKhatibId || '';
       el('permanentKhatibId').value = val;
       if (_permKhatibTomSelect) _permKhatibTomSelect.setValue(val);
@@ -350,11 +390,17 @@
       var mujawra = el('mosqueMujawra').value.trim();
       var address = el('mosqueAddress').value.trim();
       var permanentKhatibId = el('permanentKhatibId').value;
+      var managerPhone = el('managerPhone').value.trim();
       var active = el('mosqueActive').checked;
       var id = el('mosqueId').value;
 
       if (!name || !mujawra) {
         showFormError('اسم المسجد والمجاورة مطلوبان');
+        return;
+      }
+
+      if (managerPhone && !/^01\d{9}$/.test(managerPhone)) {
+        showFormError('رقم هاتف المسؤول يجب أن يكون 11 رقماً يبدأ بـ 01 أو يُترك فارغاً');
         return;
       }
 
@@ -366,7 +412,8 @@
         name: name,
         mujawra: mujawra,
         address: address,
-        permanentKhatibId: permanentKhatibId
+        permanentKhatibId: permanentKhatibId,
+        managerPhone: managerPhone
       };
       if (isEditing) {
         payload.id = id;
@@ -419,6 +466,19 @@
         toast(e.message, 'err');
       }
     }
+
+    window.resetManagerPassword = async function (phone) {
+      if (!confirm('هل أنت متأكد من إعادة ضبط كلمة المرور لرقم ' + phone + '؟\nسيتم مسح كلمة المرور الحالية والجلسات النشطة ليتمكن مسؤول المسجد من تعيين كلمة مرور جديدة عند الدخول.')) {
+        return;
+      }
+      try {
+        await api('resetMosquePassword', { phone: phone });
+        toast('تمت إعادة ضبط كلمة المرور بنجاح', 'ok');
+        await loadData();
+      } catch (e) {
+        toast(e.message || 'حدث خطأ أثناء إعادة ضبط كلمة المرور', 'err');
+      }
+    };
   </script>
 </body>
 </html>

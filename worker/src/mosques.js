@@ -2,7 +2,7 @@
 
 import { all, one, run, batch } from './db.js';
 import { nextId_ } from './settings.js';
-import { ok_, err_, norm_, isTrue_, nowIso_, todayIso_ } from './util.js';
+import { ok_, err_, norm_, normPhone, isValidPhone, isTrue_, nowIso_, todayIso_ } from './util.js';
 
 export function publicMosque_(m) {
   return {
@@ -13,6 +13,9 @@ export function publicMosque_(m) {
     permanentKhatibId: m.permanent_khatib_id || '',
     active: isTrue_(m.active),
     sortOrder: m.sort_order || 0,
+    managerPhone: m.manager_phone || '',
+    managerHasPassword: !!m.manager_password_hash,
+    managerTelegramLinked: !!m.manager_telegram_chat_id,
   };
 }
 
@@ -21,8 +24,8 @@ const MOSQUE_ORDER = 'sort_order IS NULL, sort_order ASC, id ASC';
 
 export async function listMosques_(db, includeInactive) {
   const sql = includeInactive
-    ? `SELECT * FROM mosques ORDER BY active DESC, ${MOSQUE_ORDER}`
-    : `SELECT * FROM mosques WHERE active = 1 ORDER BY ${MOSQUE_ORDER}`;
+    ? `SELECT m.*, a.password_hash AS manager_password_hash, a.telegram_chat_id AS manager_telegram_chat_id FROM mosques m LEFT JOIN mosque_accounts a ON a.phone = m.manager_phone ORDER BY m.active DESC, m.sort_order IS NULL, m.sort_order ASC, m.id ASC`
+    : `SELECT m.*, a.password_hash AS manager_password_hash, a.telegram_chat_id AS manager_telegram_chat_id FROM mosques m LEFT JOIN mosque_accounts a ON a.phone = m.manager_phone WHERE m.active = 1 ORDER BY m.sort_order IS NULL, m.sort_order ASC, m.id ASC`;
   const rows = await all(db, sql);
   return ok_({ mosques: rows.map(publicMosque_) });
 }
@@ -70,6 +73,9 @@ export async function saveMosque_(db, user, b, isNew) {
   if (!name || !mujawra) {
     return err_('BAD_REQUEST', 'اسم المسجد والمجاورة مطلوبان');
   }
+  const managerPhone = b.managerPhone === undefined && !isNew
+    ? undefined : normPhone(b.managerPhone);
+  if (managerPhone && !isValidPhone(managerPhone)) return err_('BAD_REQUEST', 'رقم هاتف مدير المسجد غير صحيح');
 
   const allMosques = await all(db, 'SELECT * FROM mosques');
 
@@ -94,8 +100,8 @@ export async function saveMosque_(db, user, b, isNew) {
     const now = nowIso_();
     try {
       await run(db,
-        'INSERT INTO mosques (id, name, mujawra, address, permanent_khatib_id, active, created_at) VALUES (?, ?, ?, ?, ?, 1, ?)',
-        id, name, mujawra, b.address || '', pk ? pk : null, now
+        'INSERT INTO mosques (id, name, mujawra, address, permanent_khatib_id, manager_phone, active, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?)',
+        id, name, mujawra, b.address || '', pk ? pk : null, managerPhone, now
       );
     } catch (err) {
       const msg = String(err && err.message || err);
@@ -118,8 +124,8 @@ export async function saveMosque_(db, user, b, isNew) {
   const active = b.active === false || b.active === 0 || b.active === 'FALSE' ? 0 : 1;
   try {
     await run(db,
-      'UPDATE mosques SET name = ?, mujawra = ?, address = ?, permanent_khatib_id = ?, active = ? WHERE id = ?',
-      name, mujawra, b.address || '', pk ? pk : null, active, b.id
+      'UPDATE mosques SET name = ?, mujawra = ?, address = ?, permanent_khatib_id = ?, manager_phone = ?, active = ? WHERE id = ?',
+      name, mujawra, b.address || '', pk ? pk : null, managerPhone === undefined ? existing.manager_phone : managerPhone, active, b.id
     );
   } catch (err) {
     const msg = String(err && err.message || err);

@@ -8,6 +8,9 @@
     "enabled": true
   },
   "workers_dev": false,
+  "vars": {
+    "TELEGRAM_BOT_USERNAME": ""
+  },
   "routes": [
     {
       "pattern": "khotba-api.daaw.dev",

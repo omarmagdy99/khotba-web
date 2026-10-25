@@ -6,7 +6,7 @@ var _CLIENT_CACHE_TTL_MS = 60 * 1000; // 60 ثانية
 var _CACHEABLE_ACTIONS = ['listKhatibs', 'listMosques', 'getSettings'];
 var _INVALIDATING_ACTIONS = [
   'createKhatib', 'updateKhatib', 'deactivateKhatib',
-  'createMosque', 'updateMosque', 'deactivateMosque', 'reorderMosque',
+  'createMosque', 'updateMosque', 'deactivateMosque', 'reorderMosque', 'resetMosquePassword',
   'setPreferences', 'publishRange', 'saveSchedule', 'generateDate', 'regenerateDate',
   'login', 'createUser', 'updateUser', 'resetUserPassword'
 ];

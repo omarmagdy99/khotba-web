@@ -52,6 +52,7 @@ export function normPhone(phone) {
   if (!phone) return null;
   let p = String(phone).replace(/[\s\-()]/g, '');
   if (!p) return null;
+  if (/^\+?201\d{9}$/.test(p)) p = '0' + p.replace(/^\+?20/, '');
   if (/^1\d{9}$/.test(p)) {
     p = '0' + p;
   }

@@ -1,5 +1,34 @@
 # API — Apps Script Web App contract
 
+## Cloudflare Worker mosque manager portal
+
+Use `POST /?region=15may` or `POST /?region=tebeen` with a JSON body. The response envelope is `{ok:true,data}` or `{ok:false,error:{code,message,details}}`; HTTP status remains 200.
+
+The following actions use the manager's own session token and do not require an admin token:
+
+| Action | Body | Successful data |
+| --- | --- | --- |
+| `mosquePhoneCheck` | `{phone}` | `{status:'needs_setup'\|'has_password',telegramLinked}` |
+| `mosqueSetPassword` | `{phone,password}` | `{token,phone,mosques:[{id,name,mujawra}]}` |
+| `mosqueLogin` | `{phone,password}` | Same as setup |
+| `mosqueWhoami` | `{token}` | `{phone,mosques:[{id,name,mujawra}]}` |
+| `mosqueLogout` | `{token}` | `{}` |
+| `mosqueGetSchedule` | `{token}` | `{date,mosques:[{mosqueId,name,mujawra,address,sortOrder,khatib:{name,phone}\|null,status}]}` |
+| `mosqueRequestReset` | `{phone}` | `{sent:true}` |
+| `mosqueConfirmReset` | `{phone,code,password}` | Same as login |
+
+The password must contain at least 8 characters. `mosqueSetPassword` returns `ALREADY_SET` once a password exists. Invalid login credentials return `BAD_CREDENTIALS`; an inactive or missing manager phone returns `NOT_FOUND`. Phone check, login, reset request and reset confirmation are rate limited with `RATE_LIMITED`. Reset codes expire after 10 minutes and can be tried at most five times. `mosqueRequestReset` returns `TELEGRAM_NOT_LINKED` with `details.botUsername` until a contact is linked, or `TELEGRAM_UNAVAILABLE` when the bot token is absent. Invalid or expired codes return `BAD_CODE`.
+
+Coordinator admin actions: `createMosque` and `updateMosque` accept optional `managerPhone` (empty clears it). `listMosques` includes `managerPhone`, `managerHasPassword`, and `managerTelegramLinked`. `resetMosquePassword {phone}` clears the password and all manager sessions, returning `{ok:true,data:{ok:true}}`.
+
+Configure Worker secrets `TELEGRAM_BOT_TOKEN` and `TELEGRAM_WEBHOOK_SECRET`, and plain variable `TELEGRAM_BOT_USERNAME`. `TELEGRAM_API_BASE` optionally overrides `https://api.telegram.org` for testing. Set the webhook, replacing the placeholders:
+
+```sh
+curl -X POST "https://api.telegram.org/bot<BOT_TOKEN>/setWebhook" -d "url=https://khotba-api.daaw.dev/telegram-webhook" -d "secret_token=<WEBHOOK_SECRET>"
+```
+
+The webhook accepts a Telegram contact only when `contact.user_id` equals `message.from.id`. The contact phone is normalized and linked in either regional database where that phone manages an active mosque.
+
 One Apps Script project bound to the spreadsheet, deployed as a Web App with access set to
 **Anyone**. The frontend on GitHub Pages is the only client.
 

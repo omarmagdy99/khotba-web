@@ -37,6 +37,12 @@ necessary but not sufficient; the script must re-assert the format on what it wr
 
 ## `mosques`
 
+`manager_phone` is an optional normalized Egyptian mobile phone. It is not unique: one manager can manage several mosques. An inactive mosque does not grant portal access.
+
+## Mosque manager portal tables
+
+Each regional D1 database has the same tables. `mosque_accounts` is keyed by normalized phone and stores nullable `password_hash`, `salt`, and `telegram_chat_id`, plus `created_at` and `updated_at`. A Telegram contact may create the row before password setup. `mosque_sessions` stores a random token, phone, and 30-day expiry; portal authentication also checks for at least one active mosque with that phone. `mosque_reset_codes` stores a salted password hash of the six-digit code, expiry, and wrong-attempt count; it never stores the code itself. `login_attempts` also holds distinct manager portal rate-limit keys.
+
 | Column | Header | Type | Required | Example |
 | --- | --- | --- | --- | --- |
 | A | `id` | text | yes | `M001` |
