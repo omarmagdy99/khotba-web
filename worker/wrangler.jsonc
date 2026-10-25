@@ -9,7 +9,7 @@
   },
   "workers_dev": false,
   "vars": {
-    "TELEGRAM_BOT_USERNAME": ""
+    "TELEGRAM_BOT_USERNAME": "khotabmaybot"
   },
   "routes": [
     {

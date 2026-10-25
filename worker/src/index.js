@@ -26,7 +26,7 @@ import {
   mosqueGetSchedule_, mosqueRequestReset_, mosqueConfirmReset_, resetMosquePassword_, telegramWebhook_
 } from './mosque-portal.js';
 
-const SCRIPT_VERSION = '2026-10-21';
+const SCRIPT_VERSION = '2026-10-25';
 
 const KNOWN_ACTIONS = [
   'login', 'logout', 'whoami', 'changePassword',
