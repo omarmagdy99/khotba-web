@@ -86,6 +86,30 @@
     </div>
   </div>
 
+  <div id="temporaryPasswordModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="temporaryPasswordTitle">
+    <div class="modal" style="max-width:420px">
+      <h2 id="temporaryPasswordTitle">كلمة مرور مؤقتة</h2>
+      <div id="temporaryPasswordConfirm">
+        <p>سيتم استبدال كلمة المرور الحالية وإلغاء الجلسات النشطة لهذا الرقم.</p>
+        <label><input type="checkbox" id="sendTemporaryTelegram"> إرسالها للمسؤول على تيليجرام</label>
+        <div id="temporaryTelegramHint" class="hint"></div>
+        <div class="modal-actions">
+          <button type="button" class="btn" id="issueTemporaryPasswordBtn">إنشاء كلمة المرور</button>
+          <button type="button" class="btn btn-plain" id="cancelTemporaryPasswordBtn">إلغاء</button>
+        </div>
+      </div>
+      <div id="temporaryPasswordResult" style="display:none">
+        <p>تظهر كلمة المرور هذه مرة واحدة فقط. شاركها مع مسؤول المسجد بشكل خاص.</p>
+        <input id="temporaryPasswordValue" type="text" dir="ltr" readonly autocomplete="off" aria-label="كلمة المرور المؤقتة">
+        <div id="temporaryTelegramStatus" class="hint"></div>
+        <div class="modal-actions">
+          <button type="button" class="btn" id="copyTemporaryPasswordBtn">نسخ</button>
+          <button type="button" class="btn btn-plain" id="closeTemporaryPasswordBtn">إغلاق</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div id="toast" class="toast"></div>
 
   <script src="config.js"></script>
@@ -238,6 +262,9 @@
           if (canEdit()) {
             resetBtn = '<button type="button" class="btn btn-sm btn-plain" style="font-size:0.75em;padding:2px 8px;margin-top:4px" onclick="resetManagerPassword(\'' + esc(phone) + '\')">' +
               '🔑 إعادة ضبط كلمة المرور' +
+            '</button>' +
+            '<button type="button" class="btn btn-sm btn-plain" style="font-size:0.75em;padding:2px 8px;margin-top:4px" onclick="openTemporaryPassword(\'' + esc(phone) + '\',' + !!m.managerTelegramLinked + ')">' +
+              '🔐 كلمة مرور مؤقتة' +
             '</button>';
           }
           managerCell = '<div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start">' +
@@ -479,6 +506,64 @@
         toast(e.message || 'حدث خطأ أثناء إعادة ضبط كلمة المرور', 'err');
       }
     };
+
+    var temporaryPhone = '';
+    window.openTemporaryPassword = function (phone, telegramLinked) {
+      if (!canEdit() || !phone) return;
+      temporaryPhone = phone;
+      el('temporaryPasswordConfirm').style.display = '';
+      el('temporaryPasswordResult').style.display = 'none';
+      el('temporaryPasswordValue').value = '';
+      el('temporaryTelegramStatus').textContent = '';
+      el('sendTemporaryTelegram').disabled = !telegramLinked;
+      el('sendTemporaryTelegram').checked = !!telegramLinked;
+      el('temporaryTelegramHint').textContent = telegramLinked ? '' : 'رقم المسؤول غير مربوط بتيليجرام.';
+      el('temporaryPasswordModal').classList.add('show');
+    };
+
+    function closeTemporaryPassword() {
+      el('temporaryPasswordModal').classList.remove('show');
+      el('temporaryPasswordValue').value = '';
+      el('temporaryTelegramStatus').textContent = '';
+      temporaryPhone = '';
+    }
+
+    el('cancelTemporaryPasswordBtn').addEventListener('click', closeTemporaryPassword);
+    el('closeTemporaryPasswordBtn').addEventListener('click', closeTemporaryPassword);
+    el('copyTemporaryPasswordBtn').addEventListener('click', async function () {
+      try {
+        await navigator.clipboard.writeText(el('temporaryPasswordValue').value);
+        toast('تم نسخ كلمة المرور', 'ok');
+      } catch (e) {
+        toast('تعذر نسخ كلمة المرور', 'err');
+      }
+    });
+    el('issueTemporaryPasswordBtn').addEventListener('click', async function () {
+      if (!temporaryPhone) return;
+      var button = this;
+      button.disabled = true;
+      el('cancelTemporaryPasswordBtn').disabled = true;
+      try {
+        var sendTelegram = el('sendTemporaryTelegram').checked;
+        var result = await api('resetMosquePassword', { phone: temporaryPhone, temporary: true, sendTelegram: sendTelegram });
+        el('temporaryPasswordValue').value = result.temporaryPassword;
+        el('temporaryTelegramStatus').textContent = sendTelegram
+          ? (result.telegramSent ? 'تم إرسالها على تيليجرام.' :
+            result.telegramError === 'NOT_LINKED' ? 'لم تُرسل: الرقم غير مربوط بتيليجرام.' :
+            result.telegramError === 'UNAVAILABLE' ? 'لم تُرسل: خدمة تيليجرام غير متاحة.' :
+            'لم تُرسل: تعذر الإرسال على تيليجرام.')
+          : 'لم يُطلب إرسالها على تيليجرام.';
+        result = null;
+        el('temporaryPasswordConfirm').style.display = 'none';
+        el('temporaryPasswordResult').style.display = '';
+        await loadData();
+      } catch (e) {
+        toast(e.message || 'حدث خطأ أثناء إنشاء كلمة المرور المؤقتة', 'err');
+      } finally {
+        button.disabled = false;
+        el('cancelTemporaryPasswordBtn').disabled = false;
+      }
+    });
   </script>
 </body>
 </html>

@@ -199,7 +199,7 @@ async function route_(b, env, request, db, region) {
     case 'updateMosque':      return await saveMosque_(db, user, b, false);
     case 'deactivateMosque':  return await deactivateMosque_(db, user, b.id);
     case 'reorderMosque':     return await reorderMosque_(db, b);
-    case 'resetMosquePassword': return await resetMosquePassword_(db, b);
+    case 'resetMosquePassword': return await resetMosquePassword_(db, env, b);
     case 'createKhatib':      return await saveKhatib_(db, user, b, true);
     case 'updateKhatib':      return await saveKhatib_(db, user, b, false);
     case 'deactivateKhatib':  return await deactivateKhatib_(db, user, b.id);

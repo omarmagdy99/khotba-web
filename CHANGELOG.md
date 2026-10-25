@@ -6,6 +6,8 @@
 
 ## [2026-10-25] — Mosque manager portal API
 
+Coordinators can now issue a one-time-view temporary manager password, optionally send it to a linked Telegram chat, and see delivery status; issuing it replaces the password and invalidates sessions.
+
 Added manager phone numbers, manager password and session APIs, current Friday khatib details, Telegram contact linking and password reset, coordinator password reset, regional D1 migration, and integration coverage.
 
 ## [2026-10-21] — بوابة السادة الخطباء بالهاتف وتأكيد الحضور والجاهزية + تعزيز الأمان

@@ -187,9 +187,59 @@ export async function mosqueConfirmReset_(db, env, b, request) {
   return await session(db, phone);
 }
 
-export async function resetMosquePassword_(db, b) {
+const TEMP_PASSWORD_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+
+function temporaryPassword() {
+  const limit = 256 - (256 % TEMP_PASSWORD_ALPHABET.length);
+  let password = '';
+  while (password.length < 10) {
+    const bytes = new Uint8Array(10 - password.length);
+    crypto.getRandomValues(bytes);
+    for (const byte of bytes) {
+      if (byte < limit && password.length < 10) password += TEMP_PASSWORD_ALPHABET[byte % TEMP_PASSWORD_ALPHABET.length];
+    }
+  }
+  return password;
+}
+
+export async function resetMosquePassword_(db, env, b) {
   const phone = phoneOf(b);
   if (!await eligible(db, phone)) return badPhone();
+  if (b.temporary === true) {
+    const password = temporaryPassword();
+    const salt = randomHex(16);
+    const hash = await hashPasswordPbkdf2(password, salt, PBKDF2_ITERATIONS, env.PEPPER);
+    const now = nowIso_();
+    await batch(db, [
+      db.prepare(`INSERT INTO mosque_accounts (phone, password_hash, salt, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(phone) DO UPDATE SET password_hash = excluded.password_hash, salt = excluded.salt, updated_at = excluded.updated_at`)
+        .bind(phone, hash, salt, now, now),
+      db.prepare('DELETE FROM mosque_sessions WHERE phone = ?').bind(phone),
+      db.prepare('DELETE FROM mosque_reset_codes WHERE phone = ?').bind(phone)
+    ]);
+    const result = { ok: true, temporaryPassword: password };
+    if (b.sendTelegram === true) {
+      const account = await one(db, 'SELECT telegram_chat_id FROM mosque_accounts WHERE phone = ?', phone);
+      if (!account?.telegram_chat_id) {
+        result.telegramSent = false;
+        result.telegramError = 'NOT_LINKED';
+      } else if (!env.TELEGRAM_BOT_TOKEN) {
+        result.telegramSent = false;
+        result.telegramError = 'UNAVAILABLE';
+      } else {
+        try {
+          await telegramSend(env, account.telegram_chat_id,
+            `كلمة المرور المؤقتة لمسؤول المسجد: ${password}\nسجّل الدخول بها واحتفظ بها بشكل خاص ولا تشاركها مع الآخرين.`);
+          result.telegramSent = true;
+        } catch {
+          result.telegramSent = false;
+          result.telegramError = 'SEND_FAILED';
+        }
+      }
+    }
+    return ok_(result);
+  }
   await batch(db, [
     db.prepare('UPDATE mosque_accounts SET password_hash = NULL, salt = NULL, updated_at = ? WHERE phone = ?').bind(nowIso_(), phone),
     db.prepare('DELETE FROM mosque_sessions WHERE phone = ?').bind(phone),

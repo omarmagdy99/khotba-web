@@ -21,6 +21,8 @@ The password must contain at least 8 characters. `mosqueSetPassword` returns `AL
 
 Coordinator admin actions: `createMosque` and `updateMosque` accept optional `managerPhone` (empty clears it). `listMosques` includes `managerPhone`, `managerHasPassword`, and `managerTelegramLinked`. `resetMosquePassword {phone}` clears the password and all manager sessions, returning `{ok:true,data:{ok:true}}`.
 
+`resetMosquePassword {phone,temporary:true,sendTelegram?:true}` replaces the manager password with a random 10-character password, invalidates sessions and reset codes, and returns `{ok:true,data:{ok:true,temporaryPassword,telegramSent?,telegramError?}}`. The password is returned only in this response. When Telegram delivery is requested, `telegramError` is `NOT_LINKED`, `UNAVAILABLE`, or `SEND_FAILED` if delivery fails; the password remains valid. This action requires coordinator access and an active mosque for the phone.
+
 Configure Worker secrets `TELEGRAM_BOT_TOKEN` and `TELEGRAM_WEBHOOK_SECRET`, and plain variable `TELEGRAM_BOT_USERNAME`. `TELEGRAM_API_BASE` optionally overrides `https://api.telegram.org` for testing. Set the webhook, replacing the placeholders:
 
 ```sh

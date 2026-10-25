@@ -1854,6 +1854,16 @@ function getNextFriday(now = new Date()) {
       assert(!schedule.data.mosques.some(m => m.mosqueId === 'M003'), 'other manager mosque hidden');
       const assigned = schedule.data.mosques.find(m => m.mosqueId === 'M001');
       assert(assigned.khatib?.name && assigned.khatib?.phone === '01011111111', 'assigned khatib name and phone');
+      const unlinkedTemporary = await api({ action: 'resetMosquePassword', token, phone: otherPhone, temporary: true, sendTelegram: true });
+      assert(unlinkedTemporary.ok && /^[A-HJ-NP-Za-km-z2-9]{10}$/.test(unlinkedTemporary.data.temporaryPassword), 'temporary password created for account without a prior row');
+      assert(unlinkedTemporary.data.telegramSent === false && unlinkedTemporary.data.telegramError === 'NOT_LINKED', 'unlinked Telegram delivery reports failure');
+      assert((await api({ action: 'mosqueLogin', phone: otherPhone, password: unlinkedTemporary.data.temporaryPassword })).ok, 'unlinked temporary password works');
+      assert((await api({ action: 'resetMosquePassword', token, phone: '01099999999', temporary: true })).error?.code === 'NOT_FOUND', 'temporary reset requires active mosque');
+      const viewerCreate = await api({ action: 'createUser', token, username: 'mosque_reset_viewer', displayName: 'مشاهد', password: 'viewerpass123', role: 'viewer' });
+      assert(viewerCreate.ok, 'viewer fixture created');
+      const viewerLogin = await api({ action: 'login', username: 'mosque_reset_viewer', password: 'viewerpass123' });
+      assert(viewerLogin.ok, 'viewer fixture logged in');
+      assert((await api({ action: 'resetMosquePassword', token: viewerLogin.data.token, phone, temporary: true })).error?.code === 'FORBIDDEN', 'viewer cannot issue temporary password');
       assert((await api({ action: 'mosqueRequestReset', phone })).error?.code === 'TELEGRAM_NOT_LINKED', 'unlinked reset');
       const webhook = (secret, contact) => fetch(`${BASE_URL}/telegram-webhook`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Telegram-Bot-Api-Secret-Token': secret },
@@ -1865,6 +1875,16 @@ function getNextFriday(now = new Date()) {
       assert((await webhook('test-secret', { user_id: 123, phone_number: '+201033334444' })).status === 200, 'valid webhook accepted');
       assert((await api({ action: 'mosquePhoneCheck', phone })).data.telegramLinked === true, 'contact linked');
       assert((await api({ action: 'listMosques', token })).data.mosques.find(m => m.id === 'M001').managerTelegramLinked, 'admin sees Telegram status');
+      const telegramCount = telegramMessages.length;
+      const temporary = await api({ action: 'resetMosquePassword', token, phone, temporary: true, sendTelegram: true });
+      assert(temporary.ok && /^[A-HJ-NP-Za-km-z2-9]{10}$/.test(temporary.data.temporaryPassword), 'linked temporary password has ten unambiguous characters');
+      assert(temporary.data.telegramSent === true && telegramMessages.length === telegramCount + 1, 'temporary password sent to linked chat');
+      assert(telegramMessages.at(-1).chat_id === '456' && telegramMessages.at(-1).text.includes(temporary.data.temporaryPassword), 'Telegram message contains password');
+      assert((await api({ action: 'mosqueWhoami', token: login.data.token })).error?.code === 'UNAUTHENTICATED', 'temporary reset kills old session');
+      assert((await api({ action: 'mosqueLogin', phone, password: 'managerpass1' })).error?.code === 'BAD_CREDENTIALS', 'temporary reset replaces old password');
+      assert((await api({ action: 'mosquePhoneCheck', phone })).data.status === 'has_password', 'temporary reset has password status');
+      assert((await api({ action: 'mosqueSetPassword', phone, password: 'managerpass2' })).error?.code === 'ALREADY_SET', 'temporary reset prevents setup claim');
+      assert((await api({ action: 'mosqueLogin', phone, password: temporary.data.temporaryPassword })).ok, 'temporary password login succeeds');
       const sent = await api({ action: 'mosqueRequestReset', phone });
       assert(sent.ok && sent.data.sent, 'reset code sent');
       const code = telegramMessages.at(-1).text.match(/\b\d{6}\b/)[0];
