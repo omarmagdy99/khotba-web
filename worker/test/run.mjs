@@ -5,6 +5,7 @@ import { spawn, execSync } from 'node:child_process';
 import { rmSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { createServer } from 'node:http';
 import { currentSermonDate_ } from '../src/khatib-portal.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -14,6 +15,8 @@ const PORT = Number(process.env.TEST_PORT) || 8787;
 const BASE_URL = `http://127.0.0.1:${PORT}`;
 
 let devProcess = null;
+let telegramServer = null;
+const telegramMessages = [];
 
 function killProcess(proc) {
   if (!proc || !proc.pid) return;
@@ -126,9 +129,19 @@ async function main() {
     shell: true,
   });
 
+  telegramServer = createServer(async (req, res) => {
+    let body = '';
+    for await (const chunk of req) body += chunk;
+    telegramMessages.push(JSON.parse(body));
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, result: {} }));
+  });
+  await new Promise(resolve => telegramServer.listen(0, '127.0.0.1', resolve));
+  const telegramBase = `http://127.0.0.1:${telegramServer.address().port}`;
+
   // 3. Spawn wrangler dev server
   console.log(`Starting wrangler dev on port ${PORT}...`);
-  devProcess = spawn(`${npxCmd} wrangler dev --local --persist-to .wrangler/test-regions --port ${PORT} --ip 127.0.0.1`, {
+  devProcess = spawn(`${npxCmd} wrangler dev --local --persist-to .wrangler/test-regions --port ${PORT} --ip 127.0.0.1 --var TELEGRAM_API_BASE:${telegramBase} --var TELEGRAM_BOT_TOKEN:test-token --var TELEGRAM_WEBHOOK_SECRET:test-secret --var TELEGRAM_BOT_USERNAME:test_bot`, {
     cwd: workerDir,
     shell: true,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -144,6 +157,7 @@ async function main() {
       killProcess(devProcess);
       devProcess = null;
     }
+    if (telegramServer) { telegramServer.close(); telegramServer = null; }
   };
 
   process.on('exit', cleanup);
@@ -1812,6 +1826,70 @@ function getNextFriday(now = new Date()) {
       // 7. Verify weekly schedule assignment statuses remain unchanged
       const currentSched = await api({ action: 'getSchedule', token, date: fridayDate });
       assert(currentSched.ok, 'weekly schedule remains readable and valid');
+    }),
+    test('Mosque manager account, schedule, Telegram linking, reset and admin reset', async () => {
+      const phone = '01033334444';
+      const otherPhone = '01033335555';
+      assert((await api({ action: 'updateMosque', token, id: 'M001', name: 'مسجد النور', mujawra: 'مجاورة 1', managerPhone: '+201033334444', permanentKhatibId: 'K001' })).ok, 'save manager phone');
+      assert((await api({ action: 'updateMosque', token, id: 'M002', name: 'مسجد التقوى', mujawra: 'مجاورة 2', managerPhone: phone })).ok, 'same manager can manage multiple mosques');
+      assert((await api({ action: 'updateMosque', token, id: 'M003', name: 'مسجد الإيمان', mujawra: 'مجاورة 3', managerPhone: '123' })).error?.code === 'BAD_REQUEST', 'invalid manager phone rejected');
+      assert((await api({ action: 'updateMosque', token, id: 'M003', name: 'مسجد الإيمان', mujawra: 'مجاورة 3', managerPhone: otherPhone })).ok, 'other manager');
+      const list = await api({ action: 'listMosques', token });
+      assert(list.data.mosques.find(m => m.id === 'M001').managerPhone === phone, 'listed manager phone normalized');
+      assert(list.data.mosques.find(m => m.id === 'M001').managerHasPassword === false, 'listed setup status');
+      assert((await api({ action: 'mosquePhoneCheck', phone })).data.status === 'needs_setup', 'phone needs setup');
+      assert((await api({ action: 'mosquePhoneCheck', phone: '01099999999' })).error?.code === 'NOT_FOUND', 'unknown manager');
+      assert((await api({ action: 'mosqueSetPassword', phone, password: 'short' })).error?.code === 'BAD_REQUEST', 'password minimum');
+      const setup = await api({ action: 'mosqueSetPassword', phone, password: 'managerpass1' });
+      assert(setup.ok && setup.data.mosques.length === 2, 'first password setup');
+      assert((await api({ action: 'mosqueSetPassword', phone, password: 'managerpass2' })).error?.code === 'ALREADY_SET', 'second setup rejected');
+      assert((await api({ action: 'mosquePhoneCheck', phone })).data.status === 'has_password', 'phone has password');
+      assert((await api({ action: 'mosqueLogin', phone, password: 'wrong' })).error?.code === 'BAD_CREDENTIALS', 'bad login');
+      const login = await api({ action: 'mosqueLogin', phone, password: 'managerpass1' });
+      assert(login.ok, 'manager login');
+      assert((await api({ action: 'mosqueWhoami', token: login.data.token })).data.mosques.length === 2, 'whoami');
+      const schedule = await api({ action: 'mosqueGetSchedule', token: login.data.token });
+      assert(schedule.ok && schedule.data.date === fridayDate && schedule.data.mosques.length === 2, 'only manager mosques in schedule');
+      assert(schedule.data.mosques.find(m => m.mosqueId === 'M002').khatib === null, 'unassigned khatib null');
+      assert(!schedule.data.mosques.some(m => m.mosqueId === 'M003'), 'other manager mosque hidden');
+      const assigned = schedule.data.mosques.find(m => m.mosqueId === 'M001');
+      assert(assigned.khatib?.name && assigned.khatib?.phone === '01011111111', 'assigned khatib name and phone');
+      assert((await api({ action: 'mosqueRequestReset', phone })).error?.code === 'TELEGRAM_NOT_LINKED', 'unlinked reset');
+      const webhook = (secret, contact) => fetch(`${BASE_URL}/telegram-webhook`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Telegram-Bot-Api-Secret-Token': secret },
+        body: JSON.stringify({ message: { from: { id: 123 }, chat: { id: 456 }, contact } })
+      });
+      await webhook('bad-secret', { user_id: 123, phone_number: '+201033334444' });
+      await webhook('test-secret', { user_id: 999, phone_number: '+201033334444' });
+      assert((await api({ action: 'mosquePhoneCheck', phone })).data.telegramLinked === false, 'invalid webhook not linked');
+      assert((await webhook('test-secret', { user_id: 123, phone_number: '+201033334444' })).status === 200, 'valid webhook accepted');
+      assert((await api({ action: 'mosquePhoneCheck', phone })).data.telegramLinked === true, 'contact linked');
+      assert((await api({ action: 'listMosques', token })).data.mosques.find(m => m.id === 'M001').managerTelegramLinked, 'admin sees Telegram status');
+      const sent = await api({ action: 'mosqueRequestReset', phone });
+      assert(sent.ok && sent.data.sent, 'reset code sent');
+      const code = telegramMessages.at(-1).text.match(/\b\d{6}\b/)[0];
+      assert((await api({ action: 'mosqueConfirmReset', phone, code: '000000', password: 'newmanager1' })).error?.code === 'BAD_CODE', 'wrong reset code');
+      const reset = await api({ action: 'mosqueConfirmReset', phone, code, password: 'newmanager1' });
+      assert(reset.ok, 'correct reset code');
+      assert((await api({ action: 'mosqueWhoami', token: login.data.token })).error?.code === 'UNAUTHENTICATED', 'old session killed');
+      assert((await api({ action: 'mosqueConfirmReset', phone, code, password: 'newmanager2' })).error?.code === 'BAD_CODE', 'code single use');
+      assert((await api({ action: 'resetMosquePassword', token, phone })).ok, 'admin reset');
+      assert((await api({ action: 'mosqueWhoami', token: reset.data.token })).error?.code === 'UNAUTHENTICATED', 'admin reset kills sessions');
+      assert((await api({ action: 'mosquePhoneCheck', phone })).data.status === 'needs_setup', 'admin reset clears password');
+      assert((await api({ action: 'mosqueRequestReset', phone })).ok, 'linked manager can request after admin reset');
+      d1Query(`UPDATE mosque_reset_codes SET expires_at = '2000-01-01T00:00:00.000Z' WHERE phone = '${phone}'`);
+      const expiredCode = telegramMessages.at(-1).text.match(/\b\d{6}\b/)[0];
+      assert((await api({ action: 'mosqueConfirmReset', phone, code: expiredCode, password: 'anotherpass1' })).error?.code === 'BAD_CODE', 'expired reset code rejected');
+      const reSetup = await api({ action: 'mosqueSetPassword', phone, password: 'anotherpass1' });
+      assert(reSetup.ok, 'setup after admin reset');
+      await api({ action: 'mosqueLogout', token: reSetup.data.token });
+      assert((await api({ action: 'mosqueWhoami', token: reSetup.data.token })).error?.code === 'UNAUTHENTICATED', 'logout invalidates session');
+      const loginCodes = [];
+      for (let i = 0; i < 6; i++) loginCodes.push((await api({ action: 'mosqueLogin', phone: otherPhone, password: 'wrong' })).error?.code);
+      assert(loginCodes.includes('BAD_CREDENTIALS') && loginCodes.at(-1) === 'RATE_LIMITED', 'wrong passwords are rate limited');
+      assert((await api({ action: 'updateMosque', token, id: 'M001', name: 'مسجد النور', mujawra: 'مجاورة 1', managerPhone: '' })).ok, 'remove manager from first mosque');
+      assert((await api({ action: 'updateMosque', token, id: 'M002', name: 'مسجد التقوى', mujawra: 'مجاورة 2', managerPhone: '' })).ok, 'remove manager from second mosque');
+      assert((await api({ action: 'mosqueWhoami', token: setup.data.token })).error?.code === 'UNAUTHENTICATED', 'session stops when no active mosque has phone');
     }),
   ];
 

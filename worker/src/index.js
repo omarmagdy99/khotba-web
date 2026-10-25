@@ -21,6 +21,10 @@ import { getSettings_ } from './settings.js';
 import { one } from './db.js';
 import { canAccessRegion } from './regions.js';
 import { khatibLogin_, khatibWhoami_, khatibGetSchedule_, khatibRespond_ } from './khatib-portal.js';
+import {
+  mosquePhoneCheck_, mosqueSetPassword_, mosqueLogin_, mosqueWhoami_, mosqueLogout_,
+  mosqueGetSchedule_, mosqueRequestReset_, mosqueConfirmReset_, resetMosquePassword_, telegramWebhook_
+} from './mosque-portal.js';
 
 const SCRIPT_VERSION = '2026-10-21';
 
@@ -33,6 +37,8 @@ const KNOWN_ACTIONS = [
   'generateDate', 'regenerateDate', 'saveSchedule', 'publishRange',
   'listUsers', 'createUser', 'updateUser', 'resetUserPassword',
   'khatibLogin', 'khatibWhoami', 'khatibGetSchedule', 'khatibRespond',
+  'mosquePhoneCheck', 'mosqueSetPassword', 'mosqueLogin', 'mosqueWhoami', 'mosqueLogout',
+  'mosqueGetSchedule', 'mosqueRequestReset', 'mosqueConfirmReset', 'resetMosquePassword',
   'listExcuseRequests', 'reviewExcuseRequest',
 ];
 
@@ -45,7 +51,7 @@ const ACTION_ROLE = {
   getKhatibSchedule: 'viewer', listDates: 'viewer', getLoadCounts: 'viewer', getSettings: 'viewer',
   getScheduleHistory: 'viewer',
   createMosque: 'coordinator', updateMosque: 'coordinator', deactivateMosque: 'coordinator',
-  reorderMosque: 'coordinator',
+  reorderMosque: 'coordinator', resetMosquePassword: 'coordinator',
   createKhatib: 'coordinator', updateKhatib: 'coordinator', deactivateKhatib: 'coordinator',
   setPreferences: 'coordinator', generateDate: 'coordinator', regenerateDate: 'coordinator',
   saveSchedule: 'coordinator', publishRange: 'coordinator',
@@ -70,6 +76,10 @@ export default {
 
     try {
       const url = new URL(request.url);
+      if (request.method === 'POST' && url.pathname === '/telegram-webhook') {
+        try { await telegramWebhook_(request, env); } catch (error) { console.error('Telegram webhook error:', error); }
+        return new Response('OK', { status: 200 });
+      }
       const region = url.searchParams.get('region') || '15may';
       if (!['15may', 'tebeen'].includes(region)) {
         return jsonResponse(err_('BAD_REQUEST', 'المنطقة غير صحيحة'));
@@ -148,6 +158,14 @@ async function route_(b, env, request, db, region) {
   if (a === 'khatibWhoami') return await khatibWhoami_(db, b);
   if (a === 'khatibGetSchedule') return await khatibGetSchedule_(db, b);
   if (a === 'khatibRespond') return await khatibRespond_(db, b);
+  if (a === 'mosquePhoneCheck') return await mosquePhoneCheck_(db, b, request);
+  if (a === 'mosqueSetPassword') return await mosqueSetPassword_(db, env, b);
+  if (a === 'mosqueLogin') return await mosqueLogin_(db, env, b, request);
+  if (a === 'mosqueWhoami') return await mosqueWhoami_(db, b);
+  if (a === 'mosqueLogout') return await mosqueLogout_(db, b);
+  if (a === 'mosqueGetSchedule') return await mosqueGetSchedule_(db, b);
+  if (a === 'mosqueRequestReset') return await mosqueRequestReset_(db, env, b, request);
+  if (a === 'mosqueConfirmReset') return await mosqueConfirmReset_(db, env, b, request);
 
   if (a === 'login') return await login_(env.DB, env, b, request);
   if (a === 'logout') return await logout_(env.DB, b);
@@ -181,6 +199,7 @@ async function route_(b, env, request, db, region) {
     case 'updateMosque':      return await saveMosque_(db, user, b, false);
     case 'deactivateMosque':  return await deactivateMosque_(db, user, b.id);
     case 'reorderMosque':     return await reorderMosque_(db, b);
+    case 'resetMosquePassword': return await resetMosquePassword_(db, b);
     case 'createKhatib':      return await saveKhatib_(db, user, b, true);
     case 'updateKhatib':      return await saveKhatib_(db, user, b, false);
     case 'deactivateKhatib':  return await deactivateKhatib_(db, user, b.id);

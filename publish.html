@@ -151,6 +151,12 @@
                 '📋 نسخ رابط بوابة الخطباء' +
               '</button>' +
             '</div>' +
+            '<div class="d-flex align-items-center justify-content-between gap-2 flex-wrap pt-2 border-top">' +
+              '<div class="small text-muted">🕌 رابط بوابة مسؤولي المساجد:</div>' +
+              '<button type="button" class="btn btn-sm btn-plain shadow-sm px-3 rounded-pill" onclick="copyMosquePortalLink()">' +
+                '📋 نسخ رابط بوابة المساجد' +
+              '</button>' +
+            '</div>' +
           '</div>';
 
         if (publishMode === 'auto') {
@@ -316,6 +322,12 @@
       var portalUrl = new URL('khatib-portal.html', window.location.href).href;
       copyPublicLink(portalUrl);
       toast('تم نسخ رابط بوابة الخطباء بنجاح 🎙️', 'ok');
+    }
+
+    function copyMosquePortalLink() {
+      var portalUrl = new URL('mosque-portal.html', window.location.href).href;
+      copyPublicLink(portalUrl);
+      toast('تم نسخ رابط بوابة مسؤولي المساجد بنجاح 🕌', 'ok');
     }
 
     function copyPublicLink(url) {

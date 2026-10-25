@@ -532,9 +532,10 @@ test('CRUD - Omitted availability preserves stored rule on old client updates on
 // 10. Chained migrations 0005 -> 0006 on a populated legacy database
 // ════════════════════════════════════════════════════════════════════
 
-test('MIGRATION CHAIN: legacy populated DB -> 0005 -> 0006 preserves rows and converges on the fresh schema', () => {
-  const legacySchema = getLegacySchema().split('-- 11. طلبات مراجعة الاعتذار')[0];
-  const migrations = ['0005_excuse_requests.sql', '0006_khatib_availability.sql']
+test('MIGRATION CHAIN: legacy populated DB -> 0005 -> 0006 -> 0007 preserves rows and converges on the fresh schema', () => {
+  const legacySchema = getLegacySchema().split('-- 11. طلبات مراجعة الاعتذار')[0]
+    .replace(/\r?\n\s*manager_phone TEXT,/, '');
+  const migrations = ['0005_excuse_requests.sql', '0006_khatib_availability.sql', '0007_mosque_portal.sql']
     .map((f) => fs.readFileSync(path.join(rootDir, 'worker/migrations', f), 'utf8'));
   const dataTables = ['users', 'mosques', 'preferences', 'assignments', 'settings', 'khatib_readiness'];
   const oldKhatibCols = 'id, name, phone, type, notes, active, created_at';
@@ -566,7 +567,13 @@ test('MIGRATION CHAIN: legacy populated DB -> 0005 -> 0006 preserves rows and co
     for (const sql of migrations) db.exec(sql);
 
     for (const t of dataTables) {
-      assert.deepEqual(db.prepare(`SELECT * FROM ${t}`).all(), before[t], `${region}: ${t} unchanged after chain`);
+      const after = db.prepare(`SELECT * FROM ${t}`).all().map((row) => {
+        if (t !== 'mosques') return row;
+        assert.equal(row.manager_phone, null, `${region}: migration 0007 adds manager_phone as NULL`);
+        const { manager_phone, ...rest } = row;
+        return Object.assign(Object.create(null), rest);
+      });
+      assert.deepEqual(after, before[t], `${region}: ${t} unchanged after chain`);
     }
     assert.deepEqual(db.prepare(`SELECT ${oldKhatibCols} FROM khatibs ORDER BY id`).all(), khatibsBefore, `${region}: legacy khatib columns unchanged`);
     for (const k of db.prepare('SELECT * FROM khatibs').all()) {

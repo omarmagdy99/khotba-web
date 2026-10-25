@@ -69,7 +69,7 @@ async function api(action, payload) {
   }
 
   if (!json.ok) {
-    if (json.error.code === 'UNAUTHENTICATED' && action.indexOf('khatib') !== 0) { clearToken(); goLogin(); }
+    if (json.error.code === 'UNAUTHENTICATED' && action.indexOf('khatib') !== 0 && action.indexOf('mosque') !== 0) { clearToken(); goLogin(); }
     if (json.error.code === 'REGION_FORBIDDEN') {
       clearClientCache();
       goAllowedRegion(json.error.details.regionAccess);
