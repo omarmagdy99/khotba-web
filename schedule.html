@@ -498,6 +498,7 @@ function isValidIsoDate(str) {
           '<button type="button" class="btn btn-sm btn-plain" id="statusReportBtn">📊 تقرير الحالات</button>' +
           '<button class="btn btn-sm btn-plain" id="pdfBtn">📄 استخراج PDF</button>' +
           '<button class="btn btn-sm btn-plain" id="wordBtn">📝 Word</button>' +
+          '<button type="button" class="btn btn-sm btn-plain" id="weeklyWordBtn">📝 البيان الأسبوعي Word</button>' +
           (canEdit() ? '<span id="saveStatus" class="save-status"></span>' : '') +
         '</div>' +
         '<div class="search-box"><span class="search-icon">🔍</span>' +
@@ -1161,6 +1162,49 @@ function isValidIsoDate(str) {
       return { title: title, headers: headers, rows: exportRows };
     }
 
+    async function downloadWeeklyStatement(button) {
+      destroyActiveTomSelect();
+      if (!state.rows.length) return;
+      var date = state.date;
+      var knownMosques = state.mosques;
+      var khatibs = new Map(state.khatibs.map(function (k) { return [String(k.id), k]; }));
+      var assignments = state.rows.map(function (row) {
+        var assignment = effective(row);
+        return { row: row, khatibId: assignment.status === 'excused' ? '' : String(assignment.khatibId || '') };
+      });
+      var label = assignments[0].row.label;
+      button.disabled = true;
+      try {
+        var references = await Promise.all([
+          assignments.some(function (a) { return !knownMosques[a.row.mosqueId]; })
+            ? api('listMosques', { includeInactive: true }) : null,
+          assignments.some(function (a) { return a.khatibId && !khatibs.has(a.khatibId); })
+            ? api('listKhatibs', { includeInactive: true }) : null
+        ]);
+        var mosques = references[0] ? Object.fromEntries(references[0].mosques.map(function (m) { return [m.id, m]; })) : knownMosques;
+        if (references[1]) references[1].khatibs.forEach(function (k) { khatibs.set(String(k.id), k); });
+        var rows = assignments.map(function (a, index) {
+          var row = a.row;
+          var mosque = mosques[row.mosqueId] || {};
+          var khatib = khatibs.get(a.khatibId) || {};
+          var savedName = a.khatibId === String(row.khatibId) ? row.khatib : '';
+          return [
+            index + 1, mosque.name || row.mosque || '',
+            mosque.address || mosque.mujawra || row.mujawra || '',
+            a.khatibId ? (khatib.name || savedName || '') : '', '', '',
+            khatib.phone || ''
+          ];
+        });
+        var title = formatDate(date) + (label ? ' — ' + label : '');
+        var headers = ['م', 'اسم المسجد', 'عنوان المسجد', 'اسم الخطيب', 'الوظيفة', 'الرقم القومي', 'رقم التليفون'];
+        await exportTableWord(title, headers, rows, 'بيان-المساجد-والخطباء-' + REGION_NAME + '-' + date, 'weekly-statement');
+      } catch (error) {
+        toast('تعذّر تحميل بيانات البيان الأسبوعي', 'err');
+      } finally {
+        button.disabled = false;
+      }
+    }
+
     function wire() {
       el('emptyBtn').onclick = function () {
         if (_reviewInProgress) return;
@@ -1210,6 +1254,9 @@ function isValidIsoDate(str) {
         destroyActiveTomSelect();
         var data = getExportData();
         exportTablePrint(data.title, data.headers, data.rows);
+      };
+      el('weeklyWordBtn').onclick = function () {
+        return downloadWeeklyStatement(this);
       };
       el('wordBtn').onclick = function () {
         destroyActiveTomSelect();

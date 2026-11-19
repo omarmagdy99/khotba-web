@@ -543,7 +543,7 @@ function loadDocxLibraries() {
   return _docxLibrariesPromise;
 }
 
-async function exportTableWord(title, headers, rows, filename) {
+async function exportTableWord(title, headers, rows, filename, layout) {
   try {
     await loadDocxLibraries();
   } catch (e) {
@@ -569,6 +569,26 @@ async function exportTableWord(title, headers, rows, filename) {
     var WidthType = docx.WidthType;
     var BorderStyle = docx.BorderStyle;
     var AlignmentType = docx.AlignmentType;
+    var weekly = layout === 'weekly-statement';
+    var columnWidths = [425, 1900, 2125, 2050, 1175, 1650, 1450];
+
+    function paragraph(text, alignment, size, bold, after) {
+      return new Paragraph({
+        bidirectional: true,
+        alignment: alignment,
+        spacing: after === undefined ? undefined : { after: after },
+        children: [new TextRun({
+          text: String(text || ''),
+          bold: bold,
+          font: 'Arial',
+          size: size,
+          sizeComplexScript: weekly ? size : undefined,
+          boldComplexScript: weekly ? bold : undefined,
+          rightToLeft: true,
+          color: '000000'
+        })]
+      });
+    }
 
     var borderDef = { style: BorderStyle.SINGLE, size: 1, color: '000000' };
     var borders = {
@@ -582,47 +602,22 @@ async function exportTableWord(title, headers, rows, filename) {
 
     var headerRow = new TableRow({
       tableHeader: true,
-      children: headers.map(function (h) {
+      children: headers.map(function (h, colIdx) {
         return new TableCell({
-          children: [
-            new Paragraph({
-              bidirectional: true,
-              alignment: AlignmentType.CENTER,
-              children: [
-                new TextRun({
-                  text: String(h || ''),
-                  bold: true,
-                  font: 'Arial',
-                  size: 24,
-                  rightToLeft: true,
-                  color: '000000'
-                })
-              ]
-            })
-          ]
+          width: weekly ? { size: columnWidths[colIdx], type: WidthType.DXA } : undefined,
+          children: [paragraph(h, AlignmentType.CENTER, weekly ? 22 : 24, true, weekly ? 0 : undefined)]
         });
       })
     });
 
     var dataRows = rows.map(function (r) {
       return new TableRow({
+        cantSplit: weekly,
         children: r.map(function (c, colIdx) {
           return new TableCell({
-            children: [
-              new Paragraph({
-                bidirectional: true,
-                alignment: colIdx === 1 ? AlignmentType.CENTER : AlignmentType.RIGHT,
-                children: [
-                  new TextRun({
-                    text: String(c || ''),
-                    font: 'Arial',
-                    size: 22,
-                    rightToLeft: true,
-                    color: '000000'
-                  })
-                ]
-              })
-            ]
+            width: weekly ? { size: columnWidths[colIdx], type: WidthType.DXA } : undefined,
+            children: [paragraph(c, weekly || colIdx === 1 ? AlignmentType.CENTER : AlignmentType.RIGHT,
+              weekly ? 20 : 22, undefined, weekly ? 0 : undefined)]
           });
         })
       });
@@ -631,29 +626,27 @@ async function exportTableWord(title, headers, rows, filename) {
     var table = new Table({
       visuallyRightToLeft: true,
       width: { size: 100, type: WidthType.PERCENTAGE },
+      columnWidths: weekly ? columnWidths : undefined,
+      layout: weekly ? docx.TableLayoutType.FIXED : undefined,
       borders: borders,
       rows: [headerRow].concat(dataRows)
     });
 
-    var titlePara = new Paragraph({
-      bidirectional: true,
-      alignment: AlignmentType.CENTER,
-      spacing: { after: 300 },
-      children: [
-        new TextRun({
-          text: String(title || ''),
-          bold: true,
-          font: 'Arial',
-          size: 30,
-          rightToLeft: true,
-          color: '000000'
-        })
-      ]
-    });
+    var heading = weekly ? [
+      paragraph('وزارة الأوقاف', AlignmentType.RIGHT, 24, true, 30),
+      paragraph('مديرية أوقاف القاهرة', AlignmentType.RIGHT, 24, true, 30),
+      paragraph('اسم الإدارة / ' + REGION_NAME, AlignmentType.RIGHT, 24, true, 120),
+      paragraph('بيان المساجد والخطباء الأسبوعي', AlignmentType.CENTER, 32, true, 60),
+      paragraph(title, AlignmentType.CENTER, 24, true, 180)
+    ] : [paragraph(title, AlignmentType.CENTER, 30, true, 300)];
 
     var doc = new Document({
       sections: [{
-        children: [titlePara, table]
+        properties: weekly ? { page: {
+          size: { width: 11906, height: 16838 },
+          margin: { top: 565, bottom: 565, left: 565, right: 565 }
+        } } : undefined,
+        children: heading.concat(table)
       }]
     });
 
