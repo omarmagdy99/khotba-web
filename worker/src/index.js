@@ -21,12 +21,17 @@ import { getSettings_ } from './settings.js';
 import { one } from './db.js';
 import { canAccessRegion } from './regions.js';
 import { khatibLogin_, khatibWhoami_, khatibGetSchedule_, khatibRespond_ } from './khatib-portal.js';
+import { issueKhatibIdentityCode_, submitKhatibNationalId_, saveKhatibNationalId_, weeklyNationalIds_ } from './khatib-identity.js';
 import {
   mosquePhoneCheck_, mosqueSetPassword_, mosqueLogin_, mosqueWhoami_, mosqueLogout_,
   mosqueGetSchedule_, mosqueRequestReset_, mosqueConfirmReset_, resetMosquePassword_, telegramWebhook_
 } from './mosque-portal.js';
 
-const SCRIPT_VERSION = '2026-10-25';
+const SCRIPT_VERSION = '2026-11-19';
+
+const PRIVATE_IDENTITY_ACTIONS = new Set([
+  'issueKhatibIdentityCode', 'khatibSubmitNationalId', 'saveKhatibNationalId', 'weeklyNationalIds'
+]);
 
 const KNOWN_ACTIONS = [
   'login', 'logout', 'whoami', 'changePassword',
@@ -37,6 +42,7 @@ const KNOWN_ACTIONS = [
   'generateDate', 'regenerateDate', 'saveSchedule', 'publishRange',
   'listUsers', 'createUser', 'updateUser', 'resetUserPassword',
   'khatibLogin', 'khatibWhoami', 'khatibGetSchedule', 'khatibRespond',
+  ...PRIVATE_IDENTITY_ACTIONS,
   'mosquePhoneCheck', 'mosqueSetPassword', 'mosqueLogin', 'mosqueWhoami', 'mosqueLogout',
   'mosqueGetSchedule', 'mosqueRequestReset', 'mosqueConfirmReset', 'resetMosquePassword',
   'listExcuseRequests', 'reviewExcuseRequest',
@@ -53,6 +59,7 @@ const ACTION_ROLE = {
   createMosque: 'coordinator', updateMosque: 'coordinator', deactivateMosque: 'coordinator',
   reorderMosque: 'coordinator', resetMosquePassword: 'coordinator',
   createKhatib: 'coordinator', updateKhatib: 'coordinator', deactivateKhatib: 'coordinator',
+  issueKhatibIdentityCode: 'coordinator', saveKhatibNationalId: 'coordinator', weeklyNationalIds: 'coordinator',
   setPreferences: 'coordinator', generateDate: 'coordinator', regenerateDate: 'coordinator',
   saveSchedule: 'coordinator', publishRange: 'coordinator',
   listExcuseRequests: 'coordinator', reviewExcuseRequest: 'coordinator',
@@ -139,7 +146,8 @@ export default {
         if (region === 'tebeen' && actionResult.error) {
           actionResult.error.message = actionResult.error.message.replace(/المجاورة/g, 'المنطقة');
         }
-        return jsonResponse(actionResult);
+        const headers = PRIVATE_IDENTITY_ACTIONS.has(body.action) ? { 'Cache-Control': 'no-store' } : {};
+        return jsonResponse(actionResult, 200, headers);
       }
 
       return jsonResponse(err_('BAD_REQUEST', 'طريقة غير مدعومة: ' + request.method));
@@ -158,6 +166,7 @@ async function route_(b, env, request, db, region) {
   if (a === 'khatibWhoami') return await khatibWhoami_(db, b);
   if (a === 'khatibGetSchedule') return await khatibGetSchedule_(db, b);
   if (a === 'khatibRespond') return await khatibRespond_(db, b);
+  if (a === 'khatibSubmitNationalId') return await submitKhatibNationalId_(db, env.KHATIB_ID_KEY, region, b);
   if (a === 'mosquePhoneCheck') return await mosquePhoneCheck_(db, b, request);
   if (a === 'mosqueSetPassword') return await mosqueSetPassword_(db, env, b);
   if (a === 'mosqueLogin') return await mosqueLogin_(db, env, b, request);
@@ -203,6 +212,9 @@ async function route_(b, env, request, db, region) {
     case 'createKhatib':      return await saveKhatib_(db, user, b, true);
     case 'updateKhatib':      return await saveKhatib_(db, user, b, false);
     case 'deactivateKhatib':  return await deactivateKhatib_(db, user, b.id);
+    case 'issueKhatibIdentityCode': return await issueKhatibIdentityCode_(db, b.khatibId);
+    case 'saveKhatibNationalId': return await saveKhatibNationalId_(db, env.KHATIB_ID_KEY, region, b);
+    case 'weeklyNationalIds': return await weeklyNationalIds_(db, env.KHATIB_ID_KEY, region, b.date);
     case 'setPreferences':    return await setPreferences_(db, b.khatibId, b.mosqueIds);
     case 'generateDate':      return await generateDate_(db, user, b);
     case 'regenerateDate':    return await regenerateDate_(db, user, b);

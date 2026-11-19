@@ -1166,6 +1166,19 @@ function isValidIsoDate(str) {
       destroyActiveTomSelect();
       if (!state.rows.length) return;
       var date = state.date;
+      var withNationalIds = canEdit();
+      if (withNationalIds && hasUnsavedChanges()) {
+        button.disabled = true;
+        try {
+          if (!await flushAutosave() || hasUnsavedChanges()) {
+            toast('احفظ التوزيع قبل تنزيل البيان بالأرقام القومية', 'err');
+            return;
+          }
+          if (state.date !== date) return;
+        } finally {
+          button.disabled = false;
+        }
+      }
       var knownMosques = state.mosques;
       var khatibs = new Map(state.khatibs.map(function (k) { return [String(k.id), k]; }));
       var assignments = state.rows.map(function (row) {
@@ -1179,10 +1192,12 @@ function isValidIsoDate(str) {
           assignments.some(function (a) { return !knownMosques[a.row.mosqueId]; })
             ? api('listMosques', { includeInactive: true }) : null,
           assignments.some(function (a) { return a.khatibId && !khatibs.has(a.khatibId); })
-            ? api('listKhatibs', { includeInactive: true }) : null
+            ? api('listKhatibs', { includeInactive: true }) : null,
+          withNationalIds ? api('weeklyNationalIds', { date: date }) : null
         ]);
         var mosques = references[0] ? Object.fromEntries(references[0].mosques.map(function (m) { return [m.id, m]; })) : knownMosques;
         if (references[1]) references[1].khatibs.forEach(function (k) { khatibs.set(String(k.id), k); });
+        var nationalIds = references[2] ? references[2].nationalIds : {};
         var rows = assignments.map(function (a, index) {
           var row = a.row;
           var mosque = mosques[row.mosqueId] || {};
@@ -1191,7 +1206,8 @@ function isValidIsoDate(str) {
           return [
             index + 1, mosque.name || row.mosque || '',
             mosque.address || mosque.mujawra || row.mujawra || '',
-            a.khatibId ? (khatib.name || savedName || '') : '', '', '',
+            a.khatibId ? (khatib.name || savedName || '') : '', '',
+            Object.hasOwn(nationalIds, a.khatibId) ? nationalIds[a.khatibId] : '',
             khatib.phone || ''
           ];
         });

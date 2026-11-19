@@ -20,7 +20,8 @@ function portal(region, expired = false) {
   const calls = [];
   const node = id => {
     if (!nodes.has(id)) nodes.set(id, { style: {}, handlers: {}, classList: { add() {}, remove() {}, toggle() {} },
-      addEventListener(event, handler) { this.handlers[event] = handler; }, focus() {} });
+      addEventListener(event, handler) { this.handlers[event] = handler; }, focus() {},
+      reset() { this.resetCalled = true; } });
     return nodes.get(id);
   };
   const url = 'https://khotba.daaw.dev/' + (region === 'tebeen' ? 'tebeen/' : '') + 'khatib-portal';
@@ -58,6 +59,14 @@ const settle = () => new Promise(resolve => setImmediate(resolve));
   assert(may.calls.every(c => c.body.token === 'may-session'));
   assert(tebeen.calls.every(c => c.body.token === 'tebeen-session'));
   assert.equal(new URL(tebeen.calls[0].url).searchParams.get('region'), 'tebeen');
+  tebeen.node('portalIdentityCode').value = 'test-code';
+  tebeen.node('portalNationalId').value = '20000000000000';
+  const form = tebeen.node('portalIdentityForm');
+  await form.handlers.submit.call(form, { preventDefault() {} });
+  assert.equal(form.resetCalled, true);
+  assert.equal(tebeen.calls.at(-1).body.action,'khatibSubmitNationalId');
+  assert.equal(tebeen.calls.at(-1).body.token,'tebeen-session');
+  assert.equal([...values.values()].includes('20000000000000'), false);
   may.node('logoutBtn').handlers.click();
   assert.equal(values.get('awqaf_khatib_token_15may'), undefined);
   assert.equal(values.get('awqaf_khatib_token_tebeen'), 'tebeen-session');

@@ -108,6 +108,20 @@
           </div>
         </div>
 
+        <details id="khatibIdentityPanel" class="field" hidden>
+          <summary>الرقم القومي للبيان الأسبوعي</summary>
+          <label for="staffNationalId">إدخال الرقم القومي</label>
+          <input id="staffNationalId" type="text" inputmode="numeric" dir="ltr" autocomplete="off" maxlength="14">
+          <div class="modal-actions">
+            <button type="button" class="btn btn-sm" id="staffNationalIdSave">حفظ الرقم القومي</button>
+            <button type="button" class="btn btn-sm btn-plain" id="issueIdentityCode">إصدار رمز للخطيب</button>
+          </div>
+          <div id="identityCodeBox" hidden>
+            <label for="identityCodeOutput">رمز استخدام واحد صالح لمدة 24 ساعة. سلّمه للخطيب نفسه.</label>
+            <input id="identityCodeOutput" type="text" readonly dir="ltr" autocomplete="off">
+          </div>
+        </details>
+
         <div id="formError" class="notice notice-err" style="display:none"></div>
 
         <div class="modal-actions">
@@ -425,9 +439,60 @@
     // Add / Edit Modal logic
     el('addKhatibBtn').addEventListener('click', openAddModal);
     el('cancelKhatibBtn').addEventListener('click', closeModal);
+    el('staffNationalId').addEventListener('keydown', function (event) {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        el('staffNationalIdSave').click();
+      }
+    });
+    el('staffNationalIdSave').addEventListener('click', function () {
+      return changeIdentity('saveKhatibNationalId');
+    });
+    el('issueIdentityCode').addEventListener('click', function () {
+      return changeIdentity('issueKhatibIdentityCode');
+    });
+
+    function resetIdentityPanel(visible) {
+      el('khatibIdentityPanel').hidden = !visible;
+      el('khatibIdentityPanel').open = false;
+      el('staffNationalId').value = '';
+      el('identityCodeOutput').value = '';
+      el('identityCodeBox').hidden = true;
+    }
+
+    async function changeIdentity(action) {
+      var khatibId = el('khatibId').value;
+      if (!canEdit() || !isEditing || !khatibId) return;
+      var save = el('staffNationalIdSave');
+      var issue = el('issueIdentityCode');
+      var panel = el('khatibIdentityPanel');
+      var input = el('staffNationalId');
+      if (save.disabled) return;
+      save.disabled = issue.disabled = true;
+      el('identityCodeBox').hidden = true;
+      el('identityCodeOutput').value = '';
+      try {
+        var payload = { khatibId: khatibId };
+        if (action === 'saveKhatibNationalId') payload.nationalId = input.value.trim();
+        var result = await api(action, payload);
+        if (panel.hidden || el('khatibId').value !== khatibId) return;
+        if (result.code) {
+          el('identityCodeOutput').value = result.code;
+          el('identityCodeBox').hidden = false;
+        } else {
+          input.value = '';
+          toast('تم حفظ الرقم القومي', 'ok');
+        }
+      } catch (error) {
+        toast(error.message, 'err');
+      } finally {
+        save.disabled = issue.disabled = false;
+      }
+    }
 
     function openAddModal() {
       isEditing = false;
+      resetIdentityPanel(false);
       el('modalTitle').textContent = 'إضافة خطيب جديد';
       el('khatibForm').reset();
       el('khatibId').value = '';
@@ -453,6 +518,7 @@
       var k = allKhatibs.find(function (x) { return x.id === id; });
       if (!k) return;
       isEditing = true;
+      resetIdentityPanel(canEdit());
       el('modalTitle').textContent = 'تعديل بيانات الخطيب';
       el('khatibId').value = k.id;
       el('khatibName').value = k.name || '';
@@ -485,6 +551,7 @@
     }
 
     function closeModal() {
+      resetIdentityPanel(false);
       el('khatibModal').classList.remove('show');
       hideFormError();
     }

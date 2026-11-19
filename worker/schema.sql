@@ -32,6 +32,14 @@ CREATE TABLE IF NOT EXISTS khatibs (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_khatibs_phone ON khatibs(phone) WHERE phone IS NOT NULL AND phone != '';
 
+CREATE TABLE IF NOT EXISTS khatib_identity (
+  khatib_id TEXT PRIMARY KEY REFERENCES khatibs(id) ON DELETE CASCADE,
+  national_id_ciphertext TEXT,
+  code_hash TEXT,
+  code_phone TEXT,
+  code_expires_at TEXT
+);
+
 -- 3. الرغبات والتفضيلات (preferences)
 CREATE TABLE IF NOT EXISTS preferences (
   khatib_id TEXT NOT NULL REFERENCES khatibs(id) ON DELETE CASCADE,
