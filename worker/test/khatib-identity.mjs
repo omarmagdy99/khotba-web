@@ -7,7 +7,18 @@ const schema = readFileSync(new URL('../schema.sql', import.meta.url), 'utf8');
 const inMemoryD1 = () => {
   const sql = new DatabaseSync(':memory:');
   sql.exec(schema);
-  return { sql, prepare(statement) {
+  return { sql, async batch(statements) {
+    sql.exec('BEGIN');
+    try {
+      const results = [];
+      for (const statement of statements) results.push(await statement.run());
+      sql.exec('COMMIT');
+      return results;
+    } catch (error) {
+      sql.exec('ROLLBACK');
+      throw error;
+    }
+  }, prepare(statement) {
     const stmt = sql.prepare(statement);
     const d1 = (values = []) => ({
       bind: (...bound) => d1(bound),
@@ -82,4 +93,19 @@ assert.equal((await submit('k1',expiring)).ok,false);
 const phoneBound = (await issue()).data.code;
 env.DB.sql.exec("UPDATE khatibs SET phone = '01000000009' WHERE id = 'K1'");
 assert.equal((await submit('k1',phoneBound)).ok,false);
+const details = { name: 'New preacher', phone: '01000000003', nationalId: arabicDigits };
+assert.equal((await api('createKhatib','viewer',details)).error.code,'FORBIDDEN');
+assert.equal((await api('createKhatib','coordinator',{...details,nationalId:'123'})).error.code,'BAD_REQUEST');
+assert.equal(env.DB.sql.prepare('SELECT id FROM khatibs WHERE name = ?').get(details.name), undefined);
+const added = (await api('createKhatib','coordinator',details)).data.id;
+const stored = () => env.DB.sql.prepare('SELECT national_id_ciphertext FROM khatib_identity WHERE khatib_id = ?').get(added)?.national_id_ciphertext;
+assert.ok(stored());
+assert.notEqual(stored(),id);
+const beforeEdit = stored();
+assert.equal((await api('updateKhatib','coordinator',{...details,id:added,nationalId:''})).ok,true);
+assert.equal(stored(),beforeEdit);
+assert.equal((await api('updateKhatib','coordinator',{...details,id:added,nationalId:'20000000000002'})).ok,true);
+assert.notEqual(stored(),beforeEdit);
+env.DB.sql.prepare("UPDATE assignments SET khatib_id = ? WHERE id = 'A1'").run(added);
+assert.deepEqual((await api('weeklyNationalIds','coordinator',{date})).data.nationalIds,{[added]:'20000000000002'});
 console.log('PASS: one-time code, encryption, private date exports, region and role authorization');

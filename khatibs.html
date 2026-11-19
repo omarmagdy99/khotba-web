@@ -66,6 +66,12 @@
         </div>
 
         <div class="field">
+          <label for="staffNationalId">الرقم القومي (اختياري)</label>
+          <input id="staffNationalId" type="text" inputmode="numeric" dir="ltr" autocomplete="off" maxlength="14" aria-describedby="nationalIdHint">
+          <div class="hint" id="nationalIdHint">14 رقمًا. يظهر في البيان الأسبوعي للمسؤول المصرّح له.</div>
+        </div>
+
+        <div class="field">
           <label>نوع الخطيب *</label>
           <div class="radio-row">
             <label><input type="radio" name="khatibType" value="primary" checked> أساسي</label>
@@ -109,11 +115,8 @@
         </div>
 
         <details id="khatibIdentityPanel" class="field" hidden>
-          <summary>الرقم القومي للبيان الأسبوعي</summary>
-          <label for="staffNationalId">إدخال الرقم القومي</label>
-          <input id="staffNationalId" type="text" inputmode="numeric" dir="ltr" autocomplete="off" maxlength="14">
+          <summary>تسجيل الرقم بواسطة الخطيب</summary>
           <div class="modal-actions">
-            <button type="button" class="btn btn-sm" id="staffNationalIdSave">حفظ الرقم القومي</button>
             <button type="button" class="btn btn-sm btn-plain" id="issueIdentityCode">إصدار رمز للخطيب</button>
           </div>
           <div id="identityCodeBox" hidden>
@@ -439,18 +442,7 @@
     // Add / Edit Modal logic
     el('addKhatibBtn').addEventListener('click', openAddModal);
     el('cancelKhatibBtn').addEventListener('click', closeModal);
-    el('staffNationalId').addEventListener('keydown', function (event) {
-      if (event.key === 'Enter') {
-        event.preventDefault();
-        el('staffNationalIdSave').click();
-      }
-    });
-    el('staffNationalIdSave').addEventListener('click', function () {
-      return changeIdentity('saveKhatibNationalId');
-    });
-    el('issueIdentityCode').addEventListener('click', function () {
-      return changeIdentity('issueKhatibIdentityCode');
-    });
+    el('issueIdentityCode').addEventListener('click', issueIdentityCode);
 
     function resetIdentityPanel(visible) {
       el('khatibIdentityPanel').hidden = !visible;
@@ -460,39 +452,31 @@
       el('identityCodeBox').hidden = true;
     }
 
-    async function changeIdentity(action) {
+    async function issueIdentityCode() {
       var khatibId = el('khatibId').value;
       if (!canEdit() || !isEditing || !khatibId) return;
-      var save = el('staffNationalIdSave');
       var issue = el('issueIdentityCode');
       var panel = el('khatibIdentityPanel');
-      var input = el('staffNationalId');
-      if (save.disabled) return;
-      save.disabled = issue.disabled = true;
+      if (issue.disabled) return;
+      issue.disabled = true;
       el('identityCodeBox').hidden = true;
       el('identityCodeOutput').value = '';
       try {
-        var payload = { khatibId: khatibId };
-        if (action === 'saveKhatibNationalId') payload.nationalId = input.value.trim();
-        var result = await api(action, payload);
+        var result = await api('issueKhatibIdentityCode', { khatibId: khatibId });
         if (panel.hidden || el('khatibId').value !== khatibId) return;
-        if (result.code) {
-          el('identityCodeOutput').value = result.code;
-          el('identityCodeBox').hidden = false;
-        } else {
-          input.value = '';
-          toast('تم حفظ الرقم القومي', 'ok');
-        }
+        el('identityCodeOutput').value = result.code;
+        el('identityCodeBox').hidden = false;
       } catch (error) {
         toast(error.message, 'err');
       } finally {
-        save.disabled = issue.disabled = false;
+        issue.disabled = false;
       }
     }
 
     function openAddModal() {
       isEditing = false;
       resetIdentityPanel(false);
+      el('nationalIdHint').textContent = '14 رقمًا. يظهر في البيان الأسبوعي للمسؤول المصرّح له.';
       el('modalTitle').textContent = 'إضافة خطيب جديد';
       el('khatibForm').reset();
       el('khatibId').value = '';
@@ -519,6 +503,7 @@
       if (!k) return;
       isEditing = true;
       resetIdentityPanel(canEdit());
+      el('nationalIdHint').textContent = 'اكتب الرقم لإضافته أو تحديثه. الخانة الفارغة تترك الرقم المحفوظ كما هو.';
       el('modalTitle').textContent = 'تعديل بيانات الخطيب';
       el('khatibId').value = k.id;
       el('khatibName').value = k.name || '';
@@ -599,6 +584,7 @@
       var name = el('khatibName').value.trim();
       var phoneRaw = el('khatibPhone').value.trim();
       var phoneClean = phoneRaw.replace(/[\s\-()]/g, '');
+      var nationalId = el('staffNationalId').value.trim();
       var notes = el('khatibNotes').value.trim();
       var active = el('khatibActive').checked;
       var id = el('khatibId').value;
@@ -616,6 +602,11 @@
 
       if (phoneClean && !/^01\d{9}$/.test(phoneClean)) {
         el('phoneError').style.display = 'block';
+        return;
+      }
+      if (nationalId && !/^[0-9٠-٩۰-۹]{14}$/.test(nationalId)) {
+        showFormError('الرقم القومي لازم يتكوّن من 14 رقمًا');
+        el('staffNationalId').focus();
         return;
       }
 
@@ -649,6 +640,7 @@
         notes: notes,
         availability: availabilityPayload
       };
+      if (nationalId) payload.nationalId = nationalId;
       if (isEditing) {
         payload.id = id;
         payload.active = active;

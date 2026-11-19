@@ -209,8 +209,8 @@ async function route_(b, env, request, db, region) {
     case 'deactivateMosque':  return await deactivateMosque_(db, user, b.id);
     case 'reorderMosque':     return await reorderMosque_(db, b);
     case 'resetMosquePassword': return await resetMosquePassword_(db, env, b);
-    case 'createKhatib':      return await saveKhatib_(db, user, b, true);
-    case 'updateKhatib':      return await saveKhatib_(db, user, b, false);
+    case 'createKhatib':      return await saveKhatib_(db, user, b, true, env.KHATIB_ID_KEY, region);
+    case 'updateKhatib':      return await saveKhatib_(db, user, b, false, env.KHATIB_ID_KEY, region);
     case 'deactivateKhatib':  return await deactivateKhatib_(db, user, b.id);
     case 'issueKhatibIdentityCode': return await issueKhatibIdentityCode_(db, b.khatibId);
     case 'saveKhatibNationalId': return await saveKhatibNationalId_(db, env.KHATIB_ID_KEY, region, b);

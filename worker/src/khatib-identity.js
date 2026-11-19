@@ -34,6 +34,16 @@ async function decryptId(key, value, context) {
 const invalidNumber = () => err_('BAD_REQUEST', 'الرقم القومي لازم يتكوّن من 14 رقمًا');
 const invalidCode = () => err_('BAD_REQUEST', 'رمز التسجيل غير صالح أو انتهت صلاحيته. راجع مسؤول التوزيع.');
 
+export async function prepareKhatibNationalId_(db, secret, region, khatibId, nationalId) {
+  const encrypted = await encryptId(await identityKey(secret), nationalId, region + ':' + khatibId);
+  return db.prepare(`
+    INSERT INTO khatib_identity (khatib_id, national_id_ciphertext)
+    SELECT id, ? FROM khatibs WHERE id = ?
+    ON CONFLICT(khatib_id) DO UPDATE SET national_id_ciphertext = excluded.national_id_ciphertext,
+      code_hash = NULL, code_phone = NULL, code_expires_at = NULL
+  `).bind(encrypted, khatibId);
+}
+
 export async function issueKhatibIdentityCode_(db, khatibId) {
   if (typeof khatibId !== 'string' || !khatibId.trim()) return err_('BAD_REQUEST', 'حدد الخطيب أولًا.');
   const code = randomHex(12);
@@ -71,13 +81,8 @@ export async function saveKhatibNationalId_(db, secret, region, b) {
   if (typeof b.khatibId !== 'string' || !b.khatibId.trim()) return err_('BAD_REQUEST', 'حدد الخطيب أولًا.');
   const nationalId = normalizeNationalId(b.nationalId);
   if (!nationalId) return invalidNumber();
-  const encrypted = await encryptId(await identityKey(secret), nationalId, region + ':' + b.khatibId);
-  const result = await run(db, `
-    INSERT INTO khatib_identity (khatib_id, national_id_ciphertext)
-    SELECT id, ? FROM khatibs WHERE id = ?
-    ON CONFLICT(khatib_id) DO UPDATE SET national_id_ciphertext = excluded.national_id_ciphertext,
-      code_hash = NULL, code_phone = NULL, code_expires_at = NULL
-  `, encrypted, b.khatibId);
+  const statement = await prepareKhatibNationalId_(db, secret, region, b.khatibId, nationalId);
+  const result = await statement.run();
   return result.meta.changes ? ok_({ saved: true }) : err_('NOT_FOUND', 'الخطيب غير موجود.');
 }
 

@@ -4,6 +4,7 @@ import { all, one, run, batch } from './db.js';
 import { nextId_ } from './settings.js';
 import { ok_, err_, norm_, normPhone, isValidPhone, isTrue_, nowIso_, todayIso_ } from './util.js';
 import { validateAvailability, parseStoredAvailability } from './availability.js';
+import { normalizeNationalId, prepareKhatibNationalId_ } from './khatib-identity.js';
 
 export function publicKhatib_(k, prefs = []) {
   const availability = parseStoredAvailability(k);
@@ -38,9 +39,21 @@ export async function listKhatibs_(db, includeInactive) {
   });
 }
 
-export async function saveKhatib_(db, user, b, isNew) {
+export async function saveKhatib_(db, user, b, isNew, secret, region) {
   const name = String(b.name || '').trim();
   if (!name) return err_('BAD_REQUEST', 'اسم الخطيب مطلوب');
+
+  const suppliedId = typeof b.nationalId === 'string' ? b.nationalId.trim() : b.nationalId;
+  const nationalId = normalizeNationalId(suppliedId);
+  if (suppliedId !== undefined && suppliedId !== '' && !nationalId) {
+    return err_('BAD_REQUEST', 'الرقم القومي لازم يتكوّن من 14 رقمًا');
+  }
+
+  async function saveDetails(statement, khatibId) {
+    if (!nationalId) return await statement.run();
+    const identity = await prepareKhatibNationalId_(db, secret, region, khatibId, nationalId);
+    return await batch(db, [statement, identity]);
+  }
 
   const rawPhone = b.phone ? normPhone(b.phone) : null;
   if (b.phone && (!rawPhone || !isValidPhone(rawPhone))) {
@@ -91,10 +104,12 @@ export async function saveKhatib_(db, user, b, isNew) {
     const allKhatibs = await all(db, 'SELECT id, name FROM khatibs');
     const id = await nextId_(db, 'next_khatib_seq', 'K');
     const now = nowIso_();
-    await run(db,
+    const insert = db.prepare(
       'INSERT INTO khatibs (id, name, phone, type, notes, active, created_at, availability_mode, availability_weeks) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)',
+    ).bind(
       id, name, rawPhone, type, b.notes || '', now, finalMode, finalWeeks
     );
+    await saveDetails(insert, id);
 
     const normName = norm_(name);
     const similar = allKhatibs
@@ -108,18 +123,13 @@ export async function saveKhatib_(db, user, b, isNew) {
   if (!existing) return err_('NOT_FOUND', 'الخطيب غير موجود');
 
   const active = b.active === false || b.active === 0 || b.active === 'FALSE' ? 0 : 1;
-  if (hasAvailabilityUpdate) {
-    await run(db,
-      'UPDATE khatibs SET name = ?, phone = ?, type = ?, notes = ?, active = ?, availability_mode = ?, availability_weeks = ? WHERE id = ?',
-      name, rawPhone, type, b.notes || '', active, finalMode, finalWeeks, b.id
-    );
-  } else {
-    // الحفاظ على القاعدة المخزنة عند تحديثات العملاء القدامى (omitted updates)
-    await run(db,
-      'UPDATE khatibs SET name = ?, phone = ?, type = ?, notes = ?, active = ? WHERE id = ?',
-      name, rawPhone, type, b.notes || '', active, b.id
-    );
-  }
+  // الحفاظ على القاعدة المخزنة عند تحديثات العملاء القدامى (omitted updates)
+  const availabilityColumns = hasAvailabilityUpdate ? ', availability_mode = ?, availability_weeks = ?' : '';
+  const availabilityValues = hasAvailabilityUpdate ? [finalMode, finalWeeks] : [];
+  const update = db.prepare(
+    'UPDATE khatibs SET name = ?, phone = ?, type = ?, notes = ?, active = ?' + availabilityColumns + ' WHERE id = ?'
+  ).bind(name, rawPhone, type, b.notes || '', active, ...availabilityValues, b.id);
+  await saveDetails(update, b.id);
 
   if (isTrue_(existing.active) && !active) {
     await deactivateKhatib_(db, user, b.id);
