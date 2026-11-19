@@ -1,0 +1,1 @@
+ALTER TABLE khatibs ADD COLUMN occupation TEXT NOT NULL DEFAULT '';

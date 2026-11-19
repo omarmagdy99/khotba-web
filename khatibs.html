@@ -65,10 +65,16 @@
           <div id="phoneError" class="error-text" style="display:none">رقم الهاتف يجب أن يتكون من 11 رقم ويبدأ بـ 01</div>
         </div>
 
-        <div class="field">
-          <label for="staffNationalId">الرقم القومي (اختياري)</label>
-          <input id="staffNationalId" type="text" inputmode="numeric" dir="ltr" autocomplete="off" maxlength="14" aria-describedby="nationalIdHint">
-          <div class="hint" id="nationalIdHint">14 رقمًا. يظهر في البيان الأسبوعي للمسؤول المصرّح له.</div>
+        <div class="form-grid" style="grid-template-columns:repeat(auto-fit,minmax(min(100%,160px),1fr));margin-bottom:0">
+          <div class="field">
+            <label for="staffNationalId">الرقم القومي (اختياري)</label>
+            <input id="staffNationalId" type="text" inputmode="numeric" dir="ltr" autocomplete="off" maxlength="14" aria-describedby="nationalIdHint">
+            <div class="hint" id="nationalIdHint">14 رقمًا. يظهر في البيان الأسبوعي للمسؤول المصرّح له.</div>
+          </div>
+          <div class="field">
+            <label for="khatibOccupation">الوظيفة (اختياري)</label>
+            <input id="khatibOccupation" type="text" maxlength="120" autocomplete="off">
+          </div>
         </div>
 
         <div class="field">
@@ -508,6 +514,7 @@
       el('khatibId').value = k.id;
       el('khatibName').value = k.name || '';
       el('khatibPhone').value = k.phone || '';
+      el('khatibOccupation').value = k.occupation || '';
       el('khatibNotes').value = k.notes || '';
       el('khatibActive').checked = isTrue(k.active);
 
@@ -585,6 +592,7 @@
       var phoneRaw = el('khatibPhone').value.trim();
       var phoneClean = phoneRaw.replace(/[\s\-()]/g, '');
       var nationalId = el('staffNationalId').value.trim();
+      var occupation = el('khatibOccupation').value.trim();
       var notes = el('khatibNotes').value.trim();
       var active = el('khatibActive').checked;
       var id = el('khatibId').value;
@@ -636,6 +644,7 @@
       var payload = {
         name: name,
         phone: phoneClean,
+        occupation: occupation,
         type: typeVal,
         notes: notes,
         availability: availabilityPayload

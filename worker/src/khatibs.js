@@ -13,6 +13,7 @@ export function publicKhatib_(k, prefs = []) {
     id: k.id,
     name: k.name,
     phone: k.phone || '',
+    occupation: k.occupation || '',
     type: k.type,
     notes: k.notes || '',
     active: isTrue_(k.active),
@@ -42,6 +43,12 @@ export async function listKhatibs_(db, includeInactive) {
 export async function saveKhatib_(db, user, b, isNew, secret, region) {
   const name = String(b.name || '').trim();
   if (!name) return err_('BAD_REQUEST', 'اسم الخطيب مطلوب');
+
+  if (b.occupation !== undefined && typeof b.occupation !== 'string') {
+    return err_('BAD_REQUEST', 'الوظيفة لازم تكون نصًا');
+  }
+  const occupation = b.occupation?.trim();
+  if (occupation?.length > 120) return err_('BAD_REQUEST', 'الوظيفة لا تزيد عن 120 حرفًا');
 
   const suppliedId = typeof b.nationalId === 'string' ? b.nationalId.trim() : b.nationalId;
   const nationalId = normalizeNationalId(suppliedId);
@@ -105,9 +112,9 @@ export async function saveKhatib_(db, user, b, isNew, secret, region) {
     const id = await nextId_(db, 'next_khatib_seq', 'K');
     const now = nowIso_();
     const insert = db.prepare(
-      'INSERT INTO khatibs (id, name, phone, type, notes, active, created_at, availability_mode, availability_weeks) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)',
+      'INSERT INTO khatibs (id, name, phone, type, notes, active, created_at, availability_mode, availability_weeks, occupation) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?)',
     ).bind(
-      id, name, rawPhone, type, b.notes || '', now, finalMode, finalWeeks
+      id, name, rawPhone, type, b.notes || '', now, finalMode, finalWeeks, occupation ?? ''
     );
     await saveDetails(insert, id);
 
@@ -127,8 +134,8 @@ export async function saveKhatib_(db, user, b, isNew, secret, region) {
   const availabilityColumns = hasAvailabilityUpdate ? ', availability_mode = ?, availability_weeks = ?' : '';
   const availabilityValues = hasAvailabilityUpdate ? [finalMode, finalWeeks] : [];
   const update = db.prepare(
-    'UPDATE khatibs SET name = ?, phone = ?, type = ?, notes = ?, active = ?' + availabilityColumns + ' WHERE id = ?'
-  ).bind(name, rawPhone, type, b.notes || '', active, ...availabilityValues, b.id);
+    'UPDATE khatibs SET name = ?, phone = ?, type = ?, notes = ?, active = ?, occupation = COALESCE(?, occupation)' + availabilityColumns + ' WHERE id = ?'
+  ).bind(name, rawPhone, type, b.notes || '', active, occupation ?? null, ...availabilityValues, b.id);
   await saveDetails(update, b.id);
 
   if (isTrue_(existing.active) && !active) {

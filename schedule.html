@@ -1206,7 +1206,7 @@ function isValidIsoDate(str) {
           return [
             index + 1, mosque.name || row.mosque || '',
             mosque.address || mosque.mujawra || row.mujawra || '',
-            a.khatibId ? (khatib.name || savedName || '') : '', '',
+            a.khatibId ? (khatib.name || savedName || '') : '', khatib.occupation || '',
             Object.hasOwn(nationalIds, a.khatibId) ? nationalIds[a.khatibId] : '',
             khatib.phone || ''
           ];

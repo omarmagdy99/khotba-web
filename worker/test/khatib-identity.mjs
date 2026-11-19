@@ -93,11 +93,16 @@ assert.equal((await submit('k1',expiring)).ok,false);
 const phoneBound = (await issue()).data.code;
 env.DB.sql.exec("UPDATE khatibs SET phone = '01000000009' WHERE id = 'K1'");
 assert.equal((await submit('k1',phoneBound)).ok,false);
-const details = { name: 'New preacher', phone: '01000000003', nationalId: arabicDigits };
+const details = { name: 'New preacher', phone: '01000000003', nationalId: arabicDigits, occupation: '  مدرس  ' };
 assert.equal((await api('createKhatib','viewer',details)).error.code,'FORBIDDEN');
 assert.equal((await api('createKhatib','coordinator',{...details,nationalId:'123'})).error.code,'BAD_REQUEST');
 assert.equal(env.DB.sql.prepare('SELECT id FROM khatibs WHERE name = ?').get(details.name), undefined);
 const added = (await api('createKhatib','coordinator',details)).data.id;
+async function readOccupation() {
+  const { data } = await api('listKhatibs','coordinator');
+  return data.khatibs.find(k => k.id === added).occupation;
+}
+assert.equal(await readOccupation(),'مدرس');
 const stored = () => env.DB.sql.prepare('SELECT national_id_ciphertext FROM khatib_identity WHERE khatib_id = ?').get(added)?.national_id_ciphertext;
 assert.ok(stored());
 assert.notEqual(stored(),id);
@@ -106,6 +111,14 @@ assert.equal((await api('updateKhatib','coordinator',{...details,id:added,nation
 assert.equal(stored(),beforeEdit);
 assert.equal((await api('updateKhatib','coordinator',{...details,id:added,nationalId:'20000000000002'})).ok,true);
 assert.notEqual(stored(),beforeEdit);
+const { name, phone, occupation: initialOccupation } = details;
+const oldClientDetails = { name, phone, id: added };
+assert.equal((await api('updateKhatib','coordinator',oldClientDetails)).ok,true);
+assert.equal(await readOccupation(),initialOccupation.trim());
+assert.equal((await api('updateKhatib','coordinator',{...oldClientDetails,occupation:'مهندس'})).ok,true);
+assert.equal(await readOccupation(),'مهندس');
+assert.equal((await api('updateKhatib','coordinator',{...oldClientDetails,occupation:''})).ok,true);
+assert.equal(await readOccupation(),'');
 env.DB.sql.prepare("UPDATE assignments SET khatib_id = ? WHERE id = 'A1'").run(added);
 assert.deepEqual((await api('weeklyNationalIds','coordinator',{date})).data.nationalIds,{[added]:'20000000000002'});
 console.log('PASS: one-time code, encryption, private date exports, region and role authorization');
