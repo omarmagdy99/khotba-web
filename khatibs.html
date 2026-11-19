@@ -38,6 +38,10 @@
       </div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <button class="btn btn-ok" id="addKhatibBtn">➕ إضافة خطيب</button>
+        <details>
+          <summary class="btn btn-plain">اختيار الأعمدة</summary>
+          <div id="columnOptions" class="radio-row" style="padding:8px;gap:10px;flex-wrap:wrap"></div>
+        </details>
         <button class="btn btn-plain" id="exportPdfBtn">📄 استخراج PDF</button>
         <button class="btn btn-plain" id="resetFiltersBtn">🔄 عرض الكل</button>
       </div>
@@ -178,6 +182,21 @@
     var currentTab = 'all';
     var filterMissingPhone = false;
     var isEditing = false;
+    var editRequest = 0;
+    var initialNationalId = '';
+    var initialOccupation = '';
+    var tableNationalIds = {};
+    var nationalIdRequest = 0;
+    var columns = [
+      { key: 'name', label: 'الاسم', width: 'minmax(0,2fr)' },
+      { key: 'phone', label: 'رقم الهاتف', width: 'minmax(0,1.3fr)' },
+      { key: 'nationalId', label: 'الرقم القومي', width: 'minmax(0,1.6fr)' },
+      { key: 'occupation', label: 'الوظيفة', width: 'minmax(0,1.4fr)' },
+      { key: 'type', label: 'النوع', width: 'minmax(0,1fr)' },
+      { key: 'prefs', label: 'المساجد المفضلة', width: 'minmax(0,2fr)' },
+      { key: 'actions', label: 'إجراءات', width: 'minmax(0,2fr)' }
+    ];
+    var visibleColumns = new Set(['name', 'phone', 'occupation', 'type', 'prefs', 'actions']);
 
     var prefsKhatibId = null;
     var selectedMosqueIds = new Set();
@@ -188,6 +207,7 @@
         var addBtn = el('addKhatibBtn');
         if (addBtn) addBtn.style.display = 'none';
       }
+      renderColumnOptions();
       await loadData();
       appReady();
     })();
@@ -209,10 +229,55 @@
           mosqueMap[m.id] = m.name + ' (' + m.mujawra + ')';
         });
 
-        renderList();
+        if (visibleColumns.has('nationalId')) await loadTableNationalIds();
+        else renderList();
       } catch (e) {
         showError(el('results'), e.message, loadData);
       }
+    }
+
+    function renderColumnOptions() {
+      el('columnOptions').innerHTML = columns.filter(function (col) {
+        return col.key !== 'name' && (col.key !== 'nationalId' || canEdit());
+      }).map(function (col) {
+        return '<label><input type="checkbox" value="' + col.key + '"' +
+          (visibleColumns.has(col.key) ? ' checked' : '') + '> ' + esc(col.label) + '</label>';
+      }).join('');
+    }
+
+    el('columnOptions').addEventListener('change', function (event) {
+      var key = event.target.value;
+      if (!columns.some(function (col) { return col.key === key; }) || key === 'name') return;
+      if (event.target.checked) {
+        if (key === 'nationalId' && !canEdit()) return;
+        visibleColumns.add(key);
+        if (key === 'nationalId') loadTableNationalIds();
+      } else {
+        visibleColumns.delete(key);
+        if (key === 'nationalId') {
+          nationalIdRequest++;
+          tableNationalIds = {};
+        }
+      }
+      renderList();
+    });
+
+    async function loadTableNationalIds() {
+      var request = ++nationalIdRequest;
+      tableNationalIds = null;
+      renderList();
+      try {
+        var result = await api('getKhatibPrivateDetails');
+        if (request !== nationalIdRequest) return;
+        tableNationalIds = result.nationalIds;
+      } catch (error) {
+        if (request !== nationalIdRequest) return;
+        tableNationalIds = {};
+        visibleColumns.delete('nationalId');
+        renderColumnOptions();
+        toast(error.message, 'err');
+      }
+      renderList();
     }
 
     function isTrue(val) {
@@ -322,14 +387,15 @@
         return;
       }
 
-      var cols = '2fr 1.3fr 1fr 2.2fr ' + (canEdit() ? '2fr;' : '1fr;');
+      var shown = columns.filter(function (col) {
+        return visibleColumns.has(col.key) && (col.key !== 'nationalId' || canEdit());
+      });
+      var cols = shown.map(function (col) { return col.width; }).join(' ');
       var html = '<div class="table-container">' +
         '<div class="table-header" style="grid-template-columns: ' + cols + '">' +
-          '<div>الاسم</div>' +
-          '<div>رقم الهاتف</div>' +
-          '<div>النوع</div>' +
-          '<div>المساجد المفضلة</div>' +
-          '<div>إجراءات</div>' +
+          shown.map(function (col) {
+            return '<div' + (col.key === 'nationalId' ? ' data-html2canvas-ignore' : '') + '>' + esc(col.label) + '</div>';
+          }).join('') +
         '</div>';
 
       items.forEach(function (k) {
@@ -382,15 +448,21 @@
           actionsHtml = '<a href="khatib-schedule.html?id=' + esc(k.id) + '" class="btn btn-sm btn-plain" style="text-decoration:none">الجدول</a>';
         }
 
+        var values = {
+          name: '<a href="khatib-schedule.html?id=' + esc(k.id) + '" style="color:var(--navy);font-weight:600;text-decoration:none">' + esc(k.name) + '</a>' + availBadge,
+          phone: phoneHtml,
+          nationalId: '<span dir="ltr" class="mono">' + (tableNationalIds === null ? '…' : esc(tableNationalIds[k.id] || '—')) + '</span>',
+          occupation: esc(k.occupation || '—'),
+          type: typeBadge,
+          prefs: prefsHtml,
+          actions: actionsHtml
+        };
         html += '<div class="table-row" style="grid-template-columns: ' + cols + '">' +
-          '<div data-label="الاسم"><a href="khatib-schedule.html?id=' + esc(k.id) + '" style="color:var(--navy);font-weight:600;text-decoration:none">' + esc(k.name) + '</a>' + availBadge + '</div>' +
-          '<div data-label="رقم الهاتف">' + phoneHtml + '</div>' +
-          '<div data-label="النوع">' + typeBadge + '</div>' +
-          '<div data-label="المساجد المفضلة">' + prefsHtml + '</div>' +
-          '<div data-label="إجراءات" style="display:flex;gap:4px;flex-wrap:wrap">' +
-            actionsHtml +
-          '</div>' +
-        '</div>';
+          shown.map(function (col) {
+            var extra = col.key === 'nationalId' ? ' data-html2canvas-ignore style="overflow-wrap:anywhere"' :
+              col.key === 'actions' ? ' style="display:flex;gap:4px;flex-wrap:wrap"' : '';
+            return '<div data-label="' + esc(col.label) + '"' + extra + '>' + values[col.key] + '</div>';
+          }).join('') + '</div>';
       });
 
       html += '</div>';
@@ -451,9 +523,14 @@
     el('issueIdentityCode').addEventListener('click', issueIdentityCode);
 
     function resetIdentityPanel(visible) {
+      editRequest++;
+      initialNationalId = '';
+      initialOccupation = '';
       el('khatibIdentityPanel').hidden = !visible;
       el('khatibIdentityPanel').open = false;
       el('staffNationalId').value = '';
+      el('staffNationalId').disabled = false;
+      el('khatibOccupation').disabled = false;
       el('identityCodeOutput').value = '';
       el('identityCodeBox').hidden = true;
     }
@@ -506,7 +583,7 @@
 
     function openEditModal(id) {
       var k = allKhatibs.find(function (x) { return x.id === id; });
-      if (!k) return;
+      if (!k || !canEdit()) return;
       isEditing = true;
       resetIdentityPanel(canEdit());
       el('nationalIdHint').textContent = 'اكتب الرقم لإضافته أو تحديثه. الخانة الفارغة تترك الرقم المحفوظ كما هو.';
@@ -540,6 +617,29 @@
       el('phoneError').style.display = 'none';
       hideFormError();
       el('khatibModal').classList.add('show');
+      loadEditDetails(id);
+    }
+
+    async function loadEditDetails(id) {
+      var request = editRequest;
+      var nationalId = el('staffNationalId');
+      var occupation = el('khatibOccupation');
+      nationalId.disabled = occupation.disabled = true;
+      el('nationalIdHint').textContent = 'جاري تحميل البيانات المحفوظة…';
+      try {
+        var details = await api('getKhatibPrivateDetails', { khatibId: id });
+        if (request !== editRequest) return;
+        initialNationalId = details.nationalId;
+        initialOccupation = details.occupation;
+        nationalId.value = initialNationalId;
+        occupation.value = initialOccupation;
+        nationalId.disabled = occupation.disabled = false;
+        el('nationalIdHint').textContent = 'اكتب الرقم لإضافته أو تحديثه. الخانة الفارغة تترك الرقم المحفوظ كما هو.';
+      } catch (error) {
+        if (request !== editRequest) return;
+        el('nationalIdHint').textContent = 'تعذّر تحميل البيانات المحفوظة.';
+        toast('تعذّر تحميل الرقم القومي والوظيفة. ' + error.message, 'err');
+      }
     }
 
     function closeModal() {
@@ -644,12 +744,14 @@
       var payload = {
         name: name,
         phone: phoneClean,
-        occupation: occupation,
         type: typeVal,
         notes: notes,
         availability: availabilityPayload
       };
-      if (nationalId) payload.nationalId = nationalId;
+      if (!el('khatibOccupation').disabled && (!isEditing || occupation !== initialOccupation)) {
+        payload.occupation = occupation;
+      }
+      if (nationalId && nationalId !== initialNationalId) payload.nationalId = nationalId;
       if (isEditing) {
         payload.id = id;
         payload.active = active;

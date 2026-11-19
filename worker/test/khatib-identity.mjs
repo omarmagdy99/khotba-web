@@ -56,7 +56,7 @@ async function api(action, token, payload = {}, region = '15may') {
   const response = await worker.fetch(new Request('https://local.invalid/?region=' + region, {
     method: 'POST', body: JSON.stringify({ action, token, ...payload })
   }), env);
-  if (['issueKhatibIdentityCode','saveKhatibNationalId','weeklyNationalIds','khatibSubmitNationalId'].includes(action)) {
+  if (['issueKhatibIdentityCode','saveKhatibNationalId','weeklyNationalIds','khatibSubmitNationalId','getKhatibPrivateDetails'].includes(action)) {
     assert.equal(response.headers.get('Cache-Control'), 'no-store');
   }
   return await response.json();
@@ -117,6 +117,14 @@ assert.equal((await api('updateKhatib','coordinator',oldClientDetails)).ok,true)
 assert.equal(await readOccupation(),initialOccupation.trim());
 assert.equal((await api('updateKhatib','coordinator',{...oldClientDetails,occupation:'مهندس'})).ok,true);
 assert.equal(await readOccupation(),'مهندس');
+assert.deepEqual((await api('getKhatibPrivateDetails','coordinator',{khatibId:added})).data,{
+  nationalId:'20000000000002', occupation:'مهندس'
+});
+assert.equal((await api('getKhatibPrivateDetails','coordinator')).data.nationalIds[added],'20000000000002');
+assert.equal((await api('getKhatibPrivateDetails','viewer',{khatibId:added})).error.code,'FORBIDDEN');
+assert.equal((await api('getKhatibPrivateDetails','coordinator',{khatibId:added},'tebeen')).error.code,'REGION_FORBIDDEN');
+assert.equal((await api('getKhatibPrivateDetails','admin',{khatibId:added},'tebeen')).error.code,'NOT_FOUND');
+assert.equal((await api('getKhatibPrivateDetails','k1')).error.code,'UNAUTHENTICATED');
 assert.equal((await api('updateKhatib','coordinator',{...oldClientDetails,occupation:''})).ok,true);
 assert.equal(await readOccupation(),'');
 env.DB.sql.prepare("UPDATE assignments SET khatib_id = ? WHERE id = 'A1'").run(added);

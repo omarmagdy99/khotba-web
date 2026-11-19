@@ -93,10 +93,30 @@ export async function weeklyNationalIds_(db, secret, region, date) {
     FROM assignments a JOIN khatib_identity i ON i.khatib_id = a.khatib_id
     WHERE a.date = ? AND a.status <> 'excused' AND i.national_id_ciphertext IS NOT NULL
   `, date);
-  if (!rows.length) return ok_({ nationalIds: {} });
+  return ok_({ nationalIds: await decryptNationalIds(rows, secret, region) });
+}
+
+export async function khatibPrivateDetails_(db, secret, region, khatibId) {
+  if (khatibId === undefined) {
+    const rows = await all(db, 'SELECT khatib_id, national_id_ciphertext FROM khatib_identity WHERE national_id_ciphertext IS NOT NULL');
+    return ok_({ nationalIds: await decryptNationalIds(rows, secret, region) });
+  }
+  if (typeof khatibId !== 'string' || !khatibId.trim()) return err_('BAD_REQUEST', 'حدد الخطيب أولًا.');
+  const row = await one(db, `
+    SELECT k.id AS khatib_id, k.occupation, i.national_id_ciphertext
+    FROM khatibs k LEFT JOIN khatib_identity i ON i.khatib_id = k.id WHERE k.id = ?
+  `, khatibId);
+  if (!row) return err_('NOT_FOUND', 'الخطيب غير موجود.');
+  const nationalId = row.national_id_ciphertext
+    ? (await decryptNationalIds([row], secret, region))[khatibId] : '';
+  return ok_({ nationalId, occupation: row.occupation || '' });
+}
+
+async function decryptNationalIds(rows, secret, region) {
+  if (!rows.length) return {};
   const key = await identityKey(secret);
   const entries = await Promise.all(rows.map(async row => [
     row.khatib_id, await decryptId(key, row.national_id_ciphertext, region + ':' + row.khatib_id)
   ]));
-  return ok_({ nationalIds: Object.fromEntries(entries) });
+  return Object.fromEntries(entries);
 }

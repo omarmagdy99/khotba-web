@@ -21,7 +21,7 @@ import { getSettings_ } from './settings.js';
 import { one } from './db.js';
 import { canAccessRegion } from './regions.js';
 import { khatibLogin_, khatibWhoami_, khatibGetSchedule_, khatibRespond_ } from './khatib-portal.js';
-import { issueKhatibIdentityCode_, submitKhatibNationalId_, saveKhatibNationalId_, weeklyNationalIds_ } from './khatib-identity.js';
+import { issueKhatibIdentityCode_, submitKhatibNationalId_, saveKhatibNationalId_, weeklyNationalIds_, khatibPrivateDetails_ } from './khatib-identity.js';
 import {
   mosquePhoneCheck_, mosqueSetPassword_, mosqueLogin_, mosqueWhoami_, mosqueLogout_,
   mosqueGetSchedule_, mosqueRequestReset_, mosqueConfirmReset_, resetMosquePassword_, telegramWebhook_
@@ -30,7 +30,7 @@ import {
 const SCRIPT_VERSION = '2026-11-19';
 
 const PRIVATE_IDENTITY_ACTIONS = new Set([
-  'issueKhatibIdentityCode', 'khatibSubmitNationalId', 'saveKhatibNationalId', 'weeklyNationalIds'
+  'issueKhatibIdentityCode', 'khatibSubmitNationalId', 'saveKhatibNationalId', 'weeklyNationalIds', 'getKhatibPrivateDetails'
 ]);
 
 const KNOWN_ACTIONS = [
@@ -60,6 +60,7 @@ const ACTION_ROLE = {
   reorderMosque: 'coordinator', resetMosquePassword: 'coordinator',
   createKhatib: 'coordinator', updateKhatib: 'coordinator', deactivateKhatib: 'coordinator',
   issueKhatibIdentityCode: 'coordinator', saveKhatibNationalId: 'coordinator', weeklyNationalIds: 'coordinator',
+  getKhatibPrivateDetails: 'coordinator',
   setPreferences: 'coordinator', generateDate: 'coordinator', regenerateDate: 'coordinator',
   saveSchedule: 'coordinator', publishRange: 'coordinator',
   listExcuseRequests: 'coordinator', reviewExcuseRequest: 'coordinator',
@@ -215,6 +216,7 @@ async function route_(b, env, request, db, region) {
     case 'issueKhatibIdentityCode': return await issueKhatibIdentityCode_(db, b.khatibId);
     case 'saveKhatibNationalId': return await saveKhatibNationalId_(db, env.KHATIB_ID_KEY, region, b);
     case 'weeklyNationalIds': return await weeklyNationalIds_(db, env.KHATIB_ID_KEY, region, b.date);
+    case 'getKhatibPrivateDetails': return await khatibPrivateDetails_(db, env.KHATIB_ID_KEY, region, b.khatibId);
     case 'setPreferences':    return await setPreferences_(db, b.khatibId, b.mosqueIds);
     case 'generateDate':      return await generateDate_(db, user, b);
     case 'regenerateDate':    return await regenerateDate_(db, user, b);
