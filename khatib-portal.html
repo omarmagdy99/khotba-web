@@ -128,7 +128,7 @@
 </head>
 <body data-no-loader="1">
   <div class="container" style="max-width: 650px; margin-top: 20px;">
-    <!-- شاشة تسجيل الدخول برقم الهاتف -->
+    <!-- شاشة تسجيل الدخول -->
     <div id="loginSection" style="display: none;">
       <div style="text-align: center; margin-bottom: 24px;">
         <div style="font-size: 3em; margin-bottom: 8px;">🎙️</div>
@@ -137,14 +137,14 @@
       </div>
 
       <div class="portal-card">
-        <form id="phoneLoginForm">
+        <form id="khatibLoginForm">
           <div class="field mb-3">
-            <label for="phoneNumber" style="font-size: 0.95em; font-weight: 700;">الرقم القومي</label>
-            <input type="text" inputmode="numeric" id="phoneNumber" dir="ltr" class="form-control" placeholder="XXXXXXXXXXXXXX" maxlength="14" required autocomplete="off" style="font-size: 1.15em; text-align: center; letter-spacing: 2px;">
-            <div class="hint">أدخل الرقم القومي المسجل لدى إدارة الأوقاف (14 رقماً).</div>
+            <label for="loginNumber" style="font-size: 0.95em; font-weight: 700;">الرقم القومي أو رقم المحمول</label>
+            <input type="text" inputmode="numeric" id="loginNumber" dir="ltr" class="form-control" maxlength="14" required autocomplete="off" aria-describedby="loginNumberHint" style="font-size: 1.15em; text-align: center; letter-spacing: 2px;">
+            <div class="hint" id="loginNumberHint">لو رقمك القومي مسجل لدى الأوقاف، أدخله (14 رقمًا). لو لسه مش مسجل، أدخل رقم المحمول المسجل (11 رقمًا يبدأ بـ 01).</div>
           </div>
 
-          <div id="loginError" class="notice notice-err" style="display: none;"></div>
+          <div id="loginError" class="notice notice-err" role="alert" style="display: none;"></div>
 
           <button type="submit" class="btn btn-ok w-100" id="loginBtn" style="padding: 12px; font-size: 1.05em;">
             دخول إلى البوابة ←
@@ -153,7 +153,7 @@
       </div>
 
       <div style="text-align: center; font-size: 0.88em; color: var(--muted); margin-top: 16px;">
-        إذا لم يكن رقمك القومي مسجلاً أو واجهتك مشكلة في الدخول، يرجى مراجعة مسؤول التنسيق بإدارة الأوقاف.
+        لو واجهتك مشكلة في الدخول، تواصل مع مسؤول التنسيق بإدارة الأوقاف.
       </div>
     </div>
 
@@ -207,7 +207,7 @@
   <script src="assets/sermon-calendar.js"></script>
   <script>
     var currentKhatib = null;
-    var khatibTokenKey = 'awqaf_khatib_nid_token_' + REGION_ID;
+    var khatibTokenKey = 'awqaf_khatib_token_' + REGION_ID;
     var currentToken = localStorage.getItem(khatibTokenKey) || '';
     var selectedDate = '';
 
@@ -232,12 +232,13 @@
       el('portalIdentityPanel').open = false;
       el('loginSection').style.display = 'block';
       el('dashboardSection').style.display = 'none';
-      el('phoneNumber').focus();
+      el('loginNumber').focus();
     }
 
     function showDashboardLoading() {
       el('loginSection').style.display = 'none';
       el('dashboardSection').style.display = 'block';
+      el('portalIdentityPanel').hidden = true;
       el('khatibNameText').textContent = 'فضيلة الشيخ...';
       el('fridayContent').innerHTML = '<div class="state"><div class="spinner"></div><p>جاري تحميل البيانات...</p></div>';
     }
@@ -245,6 +246,7 @@
     function showDashboard() {
       el('loginSection').style.display = 'none';
       el('dashboardSection').style.display = 'block';
+      el('portalIdentityPanel').hidden = currentToken.startsWith('nid_');
       el('khatibNameText').textContent = 'الشيخ ' + currentKhatib.name;
       el('khatibTypeBadge').textContent = currentKhatib.type === 'volunteer' ? 'متطوع' : 'أساسي';
       el('khatibTypeBadge').className = 'badge ' + (currentKhatib.type === 'volunteer' ? 'badge-volunteer' : 'badge-primary');
@@ -254,7 +256,6 @@
 
     el('portalIdentityForm').addEventListener('submit', async function (event) {
       event.preventDefault();
-      var form = this;
       var button = el('portalIdentitySave');
       if (!currentToken || button.disabled) return;
       button.disabled = true;
@@ -264,9 +265,8 @@
           code: el('portalIdentityCode').value.trim(),
           nationalId: el('portalNationalId').value.trim()
         });
-        form.reset();
-        el('portalIdentityPanel').open = false;
-        toast('تم حفظ الرقم القومي للبيان الأسبوعي', 'ok');
+        endPortalSession();
+        toast('تم حفظ رقمك القومي. سجّل دخولك الآن بالرقم القومي.', 'ok');
       } catch (error) {
         toast(error.message, 'err');
       } finally {
@@ -274,44 +274,59 @@
       }
     });
 
-    // تسجيل الدخول بالهاتف
-    el('phoneLoginForm').addEventListener('submit', async function (ev) {
+    el('khatibLoginForm').addEventListener('submit', async function (ev) {
       ev.preventDefault();
-      var phoneInput = el('phoneNumber').value.trim().replace(/[٠-٩۰-۹]/g, function(d) { return String(d.charCodeAt(0) & 15); });
-      if (!/^\d{14}$/.test(phoneInput)) { alert("أدخل الرقم القومي المكون من 14 رقماً"); return; }
+      var numberInput = el('loginNumber');
+      var number = numberInput.value.replace(/\s/g, '').replace(/[٠-٩۰-۹]/g, function (digit) {
+        return String(digit.charCodeAt(0) & 15);
+      });
       var errBox = el('loginError');
       var btn = el('loginBtn');
+      if (btn.disabled) return;
+      var credentials;
+      if (/^\d{14}$/.test(number)) {
+        credentials = { nationalId: number };
+      } else if (/^01\d{9}$/.test(number)) {
+        credentials = { phone: number };
+      } else {
+        errBox.textContent = 'أدخل الرقم القومي من 14 رقمًا أو رقم المحمول من 11 رقمًا يبدأ بـ 01.';
+        errBox.style.display = 'block';
+        numberInput.focus();
+        return;
+      }
 
       errBox.style.display = 'none';
       btn.disabled = true;
       btn.textContent = 'جاري التحقق...';
 
       try {
-        var res = await api('khatibLogin', { nationalId: phoneInput });
+        var res = await api('khatibLogin', Object.assign({ token: undefined }, credentials));
         currentToken = res.token;
         currentKhatib = res.khatib;
         localStorage.setItem(khatibTokenKey, currentToken);
+        numberInput.value = '';
         showDashboard();
       } catch (err) {
         errBox.textContent = err.message || 'حدث خطأ أثناء الدخول';
         errBox.style.display = 'block';
-        el('phoneNumber').focus();
+        numberInput.focus();
       } finally {
         btn.disabled = false;
         btn.textContent = 'دخول إلى البوابة ←';
       }
     });
 
-    // تسجيل الخروج
-    el('logoutBtn').addEventListener('click', function () {
+    function endPortalSession() {
       localStorage.removeItem(khatibTokenKey);
       currentToken = '';
       currentKhatib = null;
       selectedDate = '';
-      el('phoneNumber').value = '';
+      el('loginNumber').value = '';
       el('loginError').style.display = 'none';
       showLogin();
-    });
+    }
+
+    el('logoutBtn').addEventListener('click', endPortalSession);
 
     // جلب بيانات الجمعة
     async function loadFridayData(date) {
@@ -329,11 +344,7 @@
           return loadFridayData('');
         }
         if (err.code === 'UNAUTHENTICATED') {
-          localStorage.removeItem(khatibTokenKey);
-          currentToken = '';
-          currentKhatib = null;
-          selectedDate = '';
-          showLogin();
+          endPortalSession();
           return;
         }
         contentBox.innerHTML = '<div class="state error"><p>' + esc(err.message) + '</p>' +

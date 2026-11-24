@@ -28,9 +28,8 @@ function getFreshSchema() {
 
 // Helper to construct genuine legacy schema (removing availability columns)
 function getLegacySchema() {
-  const schema = fs.readFileSync(path.join(rootDir, 'worker/schema.sql'), 'utf8');
-  return schema.replace(
-    /,\r?\n\s*availability_mode\s+TEXT[^\r\n]*,\r?\n\s*availability_weeks\s+TEXT[^\r\n]*/,
+  return getFreshSchema().replace(
+    /,\r?\n\s*availability_mode\s+TEXT[^\r\n]*,\r?\n\s*availability_weeks\s+TEXT\b/,
     ''
   );
 }
@@ -529,13 +528,18 @@ test('CRUD - Omitted availability preserves stored rule on old client updates on
 });
 
 // ════════════════════════════════════════════════════════════════════
-// 10. Chained migrations 0005 -> 0006 on a populated legacy database
+// 10. Chained migrations 0005–0009 on a populated legacy database
 // ════════════════════════════════════════════════════════════════════
 
-test('MIGRATION CHAIN: legacy populated DB -> 0005 -> 0006 -> 0007 preserves rows and converges on the fresh schema', () => {
+test('MIGRATION CHAIN: 0005–0009 preserve legacy rows and converge on the fresh schema', () => {
   const legacySchema = getLegacySchema().split('-- 11. طلبات مراجعة الاعتذار')[0]
-    .replace(/\r?\n\s*manager_phone TEXT,/, '');
-  const migrations = ['0005_excuse_requests.sql', '0006_khatib_availability.sql', '0007_mosque_portal.sql']
+    .replace(/\r?\n\s*manager_phone TEXT,/, '')
+    .replace(/,\r?\n\s*occupation TEXT[^\r\n]*/, '')
+    .replace(/CREATE TABLE IF NOT EXISTS khatib_identity \([\s\S]*?\r?\n\);/, '');
+  const migrations = [
+    '0005_excuse_requests.sql', '0006_khatib_availability.sql', '0007_mosque_portal.sql',
+    '0008_khatib_identity.sql', '0009_khatib_occupation.sql'
+  ]
     .map((f) => fs.readFileSync(path.join(rootDir, 'worker/migrations', f), 'utf8'));
   const dataTables = ['users', 'mosques', 'preferences', 'assignments', 'settings', 'khatib_readiness'];
   const oldKhatibCols = 'id, name, phone, type, notes, active, created_at';
@@ -579,8 +583,10 @@ test('MIGRATION CHAIN: legacy populated DB -> 0005 -> 0006 -> 0007 preserves row
     for (const k of db.prepare('SELECT * FROM khatibs').all()) {
       assert.equal(k.availability_mode, 'all');
       assert.equal(k.availability_weeks, null);
+      assert.equal(k.occupation, '');
     }
     assert.equal(db.prepare('SELECT COUNT(*) AS c FROM excuse_requests').get().c, 0);
+    assert.equal(db.prepare('SELECT COUNT(*) AS c FROM khatib_identity').get().c, 0);
 
     // Migrated structure must match a fresh install of schema.sql
     const fresh = new DatabaseSync(':memory:');

@@ -27,10 +27,10 @@ import {
   mosqueGetSchedule_, mosqueRequestReset_, mosqueConfirmReset_, resetMosquePassword_, telegramWebhook_
 } from './mosque-portal.js';
 
-const SCRIPT_VERSION = '2026-11-19';
+const SCRIPT_VERSION = '2026-11-24';
 
 const PRIVATE_IDENTITY_ACTIONS = new Set([
-  'issueKhatibIdentityCode', 'khatibSubmitNationalId', 'saveKhatibNationalId', 'weeklyNationalIds', 'getKhatibPrivateDetails'
+  'khatibLogin', 'issueKhatibIdentityCode', 'khatibSubmitNationalId', 'saveKhatibNationalId', 'weeklyNationalIds', 'getKhatibPrivateDetails'
 ]);
 
 const KNOWN_ACTIONS = [
@@ -41,7 +41,7 @@ const KNOWN_ACTIONS = [
   'createKhatib', 'updateKhatib', 'deactivateKhatib', 'setPreferences',
   'generateDate', 'regenerateDate', 'saveSchedule', 'publishRange',
   'listUsers', 'createUser', 'updateUser', 'resetUserPassword',
-  'khatibLogin', 'khatibWhoami', 'khatibGetSchedule', 'khatibRespond',
+  'khatibWhoami', 'khatibGetSchedule', 'khatibRespond',
   ...PRIVATE_IDENTITY_ACTIONS,
   'mosquePhoneCheck', 'mosqueSetPassword', 'mosqueLogin', 'mosqueWhoami', 'mosqueLogout',
   'mosqueGetSchedule', 'mosqueRequestReset', 'mosqueConfirmReset', 'resetMosquePassword',

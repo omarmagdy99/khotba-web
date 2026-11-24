@@ -141,7 +141,8 @@ async function main() {
 
   // 3. Spawn wrangler dev server
   console.log(`Starting wrangler dev on port ${PORT}...`);
-  devProcess = spawn(`${npxCmd} wrangler dev --local --persist-to .wrangler/test-regions --port ${PORT} --ip 127.0.0.1 --var TELEGRAM_API_BASE:${telegramBase} --var TELEGRAM_BOT_TOKEN:test-token --var TELEGRAM_WEBHOOK_SECRET:test-secret --var TELEGRAM_BOT_USERNAME:test_bot`, {
+  const testIdentityKey = '97'.repeat(32);
+  devProcess = spawn(`${npxCmd} wrangler dev --local --persist-to .wrangler/test-regions --port ${PORT} --ip 127.0.0.1 --var TELEGRAM_API_BASE:${telegramBase} --var TELEGRAM_BOT_TOKEN:test-token --var TELEGRAM_WEBHOOK_SECRET:test-secret --var TELEGRAM_BOT_USERNAME:test_bot --var KHATIB_ID_KEY:${testIdentityKey}`, {
     cwd: workerDir,
     shell: true,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -1232,9 +1233,16 @@ function getNextFriday(now = new Date()) {
         ]
       });
 
-      // Login as K001
-      const k1 = await api({ action: 'khatibLogin', phone: '01011111111' });
-      assert(k1.ok, 'K001 login ok');
+      const phone = '01011111111';
+      const nationalId = '20000000000001';
+      const phoneSession = await api({ action: 'khatibLogin', phone });
+      assert(phoneSession.ok, 'K001 can log in with a mobile number before enrollment');
+      const enrollment = await api({ action: 'saveKhatibNationalId', token, khatibId: 'K001', nationalId });
+      assert(enrollment.ok, 'coordinator saves K001 national ID');
+      assert((await api({ action: 'khatibLogin', phone })).error?.code === 'NOT_FOUND', 'registered national ID blocks mobile login');
+      assert((await api({ action: 'khatibWhoami', token: phoneSession.data.token })).error?.code === 'UNAUTHENTICATED', 'registration invalidates an active mobile session');
+      const k1 = await api({ action: 'khatibLogin', nationalId });
+      assert(k1.ok && k1.data.khatib.id === 'K001', 'K001 logs in using the registered national ID');
 
       // Verify portal schedule shows confirmed assignment with no pending request
       let portalSched = await api({ action: 'khatibGetSchedule', token: k1.data.token, date: fridayDate });
@@ -1572,18 +1580,19 @@ function getNextFriday(now = new Date()) {
       const fs = await import('node:fs');
       const path = await import('node:path');
       const { khatibRespond_, currentSermonDate_ } = await import('../src/khatib-portal.js');
+      const reviewToken = 'a'.repeat(64);
 
       const schemaPath = path.resolve(workerDir, 'schema.sql');
       const schemaText = fs.readFileSync(schemaPath, 'utf8');
 
       function setupDb() {
-        const s = new DatabaseSync(':memory:');
+        const s = new DatabaseSync(':memory:', { enableDoubleQuotedStringLiterals: true });
         s.exec(schemaText);
         const date = currentSermonDate_();
         s.prepare('INSERT INTO khatibs(id,name,phone,type,active,created_at) VALUES (?,?,?,?,?,?)').run('K1','خطيب 1','01012345678','primary',1,'2026-01-01');
         s.prepare('INSERT INTO khatibs(id,name,phone,type,active,created_at) VALUES (?,?,?,?,?,?)').run('K2','خطيب 2','01098765432','primary',1,'2026-01-01');
         s.prepare('INSERT INTO mosques(id,name,mujawra,active,created_at,sort_order) VALUES (?,?,?,?,?,?)').run('M1','مسجد التجربة','Area',1,'2026-01-01',1);
-        s.prepare('INSERT INTO khatib_sessions(token,khatib_id,phone,expires_at) VALUES (?,?,?,?)').run('review-token','K1','01012345678','2099-01-01');
+        s.prepare('INSERT INTO khatib_sessions(token,khatib_id,phone,expires_at) VALUES (?,?,?,?)').run(reviewToken,'K1','01012345678','2099-01-01');
         return { s, date, assignId: date + '_M1' };
       }
 
@@ -1635,7 +1644,7 @@ function getNextFriday(now = new Date()) {
           }
         });
 
-        const res = await khatibRespond_(db, { token: 'review-token', date, responseType: 'assignment', status: 'confirmed' });
+        const res = await khatibRespond_(db, { token: reviewToken, date, responseType: 'assignment', status: 'confirmed' });
         assert(!res.ok, 'delayed confirm after acceptance returns conflict');
         assert(res.error?.code === 'CONFLICT', 'error code is CONFLICT');
         const readiness = s.prepare('SELECT status FROM khatib_readiness WHERE date=? AND khatib_id=?').get(date, 'K1').status;
@@ -1654,7 +1663,7 @@ function getNextFriday(now = new Date()) {
           }
         });
 
-        const res = await khatibRespond_(db, { token: 'review-token', date, responseType: 'assignment', status: 'excused' });
+        const res = await khatibRespond_(db, { token: reviewToken, date, responseType: 'assignment', status: 'excused' });
         assert(!res.ok, 'delayed initial-excuse after concurrent confirmation returns conflict');
         assert(res.error?.code === 'CONFLICT', 'error code is CONFLICT');
         const assignStatus = s.prepare('SELECT status FROM assignments WHERE id=?').get(assignId).status;
@@ -1674,7 +1683,7 @@ function getNextFriday(now = new Date()) {
           }
         });
 
-        const res = await khatibRespond_(db, { token: 'review-token', date, responseType: 'assignment', status: 'excused' });
+        const res = await khatibRespond_(db, { token: reviewToken, date, responseType: 'assignment', status: 'excused' });
         assert(!res.ok, 'pending creation after reassignment returns conflict');
         assert(res.error?.code === 'CONFLICT', 'error code is CONFLICT');
         const reqCount = s.prepare('SELECT COUNT(*) as count FROM excuse_requests WHERE khatib_id=?').get('K1').count;
@@ -1687,7 +1696,7 @@ function getNextFriday(now = new Date()) {
         s.prepare('INSERT INTO assignments(id,date,mosque_id,khatib_id,status,date_type,label,updated_by,updated_at) VALUES (?,?,?,?,?,?,?,?,?)').run(assignId,date,'M1','K1','confirmed','friday','','admin','v1');
 
         const db = makeAdapter(s);
-        const res = await khatibRespond_(db, { token: 'review-token', date, responseType: 'readiness', status: 'excused' });
+        const res = await khatibRespond_(db, { token: reviewToken, date, responseType: 'readiness', status: 'excused' });
         assert(!res.ok, 'readiness excuse rejected when confirmed assignment exists');
         assert(res.error?.code === 'BAD_REQUEST', 'error code is BAD_REQUEST');
         const readyRow = s.prepare('SELECT * FROM khatib_readiness WHERE date=? AND khatib_id=?').get(date, 'K1');
@@ -1701,7 +1710,7 @@ function getNextFriday(now = new Date()) {
         s.prepare('INSERT INTO khatib_readiness(date,khatib_id,status,updated_at) VALUES (?,?,?,?)').run(date,'K1','ready','v1');
 
         const db = makeAdapter(s);
-        const res = await khatibRespond_(db, { token: 'review-token', date, responseType: 'assignment', status: 'confirmed' });
+        const res = await khatibRespond_(db, { token: reviewToken, date, responseType: 'assignment', status: 'confirmed' });
         assert(res.ok, 'idempotent confirmation succeeds');
         const assignRow = s.prepare('SELECT status, updated_at FROM assignments WHERE id=?').get(assignId);
         assert(assignRow.status === 'confirmed');
