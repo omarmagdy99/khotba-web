@@ -112,7 +112,7 @@ export async function khatibPrivateDetails_(db, secret, region, khatibId) {
   return ok_({ nationalId, occupation: row.occupation || '' });
 }
 
-async function decryptNationalIds(rows, secret, region) {
+export async function decryptNationalIds(rows, secret, region) {
   if (!rows.length) return {};
   const key = await identityKey(secret);
   const entries = await Promise.all(rows.map(async row => [
