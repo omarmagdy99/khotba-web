@@ -163,7 +163,7 @@ async function route_(b, env, request, db, region) {
   const a = b.action;
 
   // إجراءات بوابة الخطباء (تعتمد على الهاتف والتوكن الخاص بالخطيب بدون صلاحيات لوحة التحكم)
-  if (a === 'khatibLogin') return await khatibLogin_(db, b, request);
+  if (a === 'khatibLogin') return await khatibLogin_(db, b, request, env.KHATIB_ID_KEY, region);
   if (a === 'khatibWhoami') return await khatibWhoami_(db, b);
   if (a === 'khatibGetSchedule') return await khatibGetSchedule_(db, b);
   if (a === 'khatibRespond') return await khatibRespond_(db, b);

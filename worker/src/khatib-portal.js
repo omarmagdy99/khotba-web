@@ -1,8 +1,9 @@
 // أوقاف 15 مايو والتبين — بوابة الخطباء للتحقق وتأكيد الحضور أو الاعتذار
-// الدخول برقم الهاتف فقط
+// الدخول بالرقم القومي فقط
 
 import { one, all, run, batch } from './db.js';
-import { randomHex } from './crypto.js';
+import { normalizeNationalId, decryptNationalIds } from './khatib-identity.js';
+import { randomHex, sha256Hex } from './crypto.js';
 import { ok_, err_, normPhone, isValidPhone, isIsoDate_, nowIso_, todayIso_ } from './util.js';
 
 const KHATIB_SESSION_DAYS = 30;
@@ -10,9 +11,9 @@ const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 const RATE_LIMIT_MAX_FAILURES = 5;
 
 /**
- * تسجيل دخول الخطيب برقم الهاتف فقط
+ * تسجيل دخول الخطيب بالرقم القومي فقط
  */
-export async function khatibLogin_(db, b, requestOrIp) {
+export async function khatibLogin_(db, b, requestOrIp, secret, region) {
   let ip = '127.0.0.1';
   if (typeof requestOrIp === 'string' && requestOrIp) {
     ip = requestOrIp.trim();
@@ -22,11 +23,10 @@ export async function khatibLogin_(db, b, requestOrIp) {
          '127.0.0.1';
   }
 
-  const rawPhone = String(b.phone || '').trim();
-  const phone = normPhone(rawPhone);
+  const nationalId = normalizeNationalId(b.nationalId);
 
   const ipKey = 'kip:' + ip;
-  const pKey = phone ? ('kp:' + phone) : null;
+  const pKey = nationalId ? ('kid:' + sha256Hex(secret + ':' + region + ':' + nationalId)) : null;
   const nowMs = Date.now();
   const cutoffIso = new Date(nowMs - RATE_LIMIT_WINDOW_MS).toISOString();
 
@@ -45,15 +45,18 @@ export async function khatibLogin_(db, b, requestOrIp) {
     }
   }
 
-  if (!phone || !isValidPhone(phone)) {
+  if (!nationalId) {
     await recordKhatibFailure_(db, ipKey, pKey, cutoffIso);
-    return err_('BAD_REQUEST', 'يرجى إدخال رقم هاتف محمول صحيح (11 رقماً يبدأ بـ 01)');
+    return err_('BAD_REQUEST', 'يرجى إدخال الرقم القومي الصحيح (14 رقماً)');
   }
 
-  const khatib = await one(db, 'SELECT id, name, phone, type, active FROM khatibs WHERE phone = ?', phone);
+  const rows = await all(db, 'SELECT i.khatib_id, i.national_id_ciphertext FROM khatib_identity i JOIN khatibs k ON k.id = i.khatib_id WHERE k.active = 1 AND i.national_id_ciphertext IS NOT NULL');
+  const ids = await decryptNationalIds(rows, secret, region);
+  const matches = Object.keys(ids).filter(id => ids[id] === nationalId);
+  const khatib = matches.length === 1 ? await one(db, 'SELECT id, name, phone, type, active FROM khatibs WHERE id = ?', matches[0]) : null;
   if (!khatib || khatib.active !== 1) {
     await recordKhatibFailure_(db, ipKey, pKey, cutoffIso);
-    return err_('NOT_FOUND', 'رقم الهاتف غير مسجل في قائمة خطباء هذه المنطقة. تأكد من الرقم أو تواصل مع إدارة الأوقاف لإضافته.');
+    return err_('NOT_FOUND', 'تعذر التحقق من الرقم القومي. تأكد من الرقم أو راجع مسؤول التنسيق.');
   }
 
   // نجاح: مسح محاولات الفشل للرقم
@@ -61,7 +64,7 @@ export async function khatibLogin_(db, b, requestOrIp) {
     await run(db, 'DELETE FROM login_attempts WHERE key = ?', pKey);
   }
 
-  const token = randomHex(32);
+  const token = 'nid_' + randomHex(32);
   const expires = new Date(nowMs + KHATIB_SESSION_DAYS * 864e5).toISOString();
 
   await run(db,
@@ -111,7 +114,7 @@ async function recordKhatibFailure_(db, ipKey, pKey, cutoffIso) {
  * التحقق من توكن جلسة الخطيب
  */
 export async function khatibAuth_(db, token) {
-  if (!token) return null;
+  if (typeof token !== 'string' || !/^nid_[a-f0-9]{64}$/.test(token)) return null;
   const nowIso = nowIso_();
   const row = await one(db, `
     SELECT ks.token, ks.khatib_id, ks.expires_at, k.name, k.phone, k.type, k.active
@@ -133,7 +136,7 @@ export async function khatibAuth_(db, token) {
 export async function khatibWhoami_(db, b) {
   const khatib = await khatibAuth_(db, b.token);
   if (!khatib) {
-    return err_('UNAUTHENTICATED', 'انتهت الجلسة أو غير صالحة، يرجى إدخال رقم الهاتف من جديد.');
+    return err_('UNAUTHENTICATED', 'انتهت الجلسة أو غير صالحة، يرجى إدخال الرقم القومي من جديد.');
   }
   return ok_({ khatib });
 }
@@ -144,7 +147,7 @@ export async function khatibWhoami_(db, b) {
 export async function khatibGetSchedule_(db, b) {
   const khatib = await khatibAuth_(db, b.token);
   if (!khatib) {
-    return err_('UNAUTHENTICATED', 'انتهت الجلسة أو غير صالحة، يرجى إدخال رقم الهاتف من جديد.');
+    return err_('UNAUTHENTICATED', 'انتهت الجلسة أو غير صالحة، يرجى إدخال الرقم القومي من جديد.');
   }
 
   // الخطبة الحالية هي أقرب جمعة، بما فيها اليوم إذا كان الجمعة، بتوقيت القاهرة.
@@ -225,7 +228,7 @@ export async function khatibGetSchedule_(db, b) {
 export async function khatibRespond_(db, b) {
   const khatib = await khatibAuth_(db, b.token);
   if (!khatib) {
-    return err_('UNAUTHENTICATED', 'انتهت الجلسة أو غير صالحة، يرجى إدخال رقم الهاتف من جديد.');
+    return err_('UNAUTHENTICATED', 'انتهت الجلسة أو غير صالحة، يرجى إدخال الرقم القومي من جديد.');
   }
 
   const date = String(b.date || '').trim();
