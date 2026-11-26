@@ -11,10 +11,23 @@ export function normalizeNationalId(value) {
   return /^[0-9]{14}$/.test(digits) ? digits : '';
 }
 
-async function identityKey(secret) {
+function identityKeyBytes(secret) {
   if (!/^[a-f0-9]{64}$/.test(secret || '')) throw new Error('Invalid khatib identity encryption key');
-  const bytes = Uint8Array.from(secret.match(/../g), pair => parseInt(pair, 16));
-  return await crypto.subtle.importKey('raw', bytes, 'AES-GCM', false, ['encrypt', 'decrypt']);
+  return Uint8Array.from(secret.match(/../g), pair => parseInt(pair, 16));
+}
+
+async function identityKey(secret) {
+  return await crypto.subtle.importKey('raw', identityKeyBytes(secret), 'AES-GCM', false, ['encrypt', 'decrypt']);
+}
+
+async function nationalIdFingerprint(secret, region, nationalId) {
+  const material = await crypto.subtle.importKey('raw', identityKeyBytes(secret), 'HKDF', false, ['deriveKey']);
+  const key = await crypto.subtle.deriveKey(
+    { name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(32), info: encoder.encode('khotba:national-id-uniqueness:v1') },
+    material, { name: 'HMAC', hash: 'SHA-256', length: 256 }, false, ['sign']
+  );
+  const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(region + ':' + nationalId));
+  return btoa(String.fromCharCode(...new Uint8Array(signature)));
 }
 
 async function encryptId(key, value, context) {
@@ -34,14 +47,38 @@ async function decryptId(key, value, context) {
 const invalidNumber = () => err_('BAD_REQUEST', 'الرقم القومي لازم يتكوّن من 14 رقمًا');
 const invalidCode = () => err_('BAD_REQUEST', 'رمز التسجيل غير صالح أو انتهت صلاحيته. راجع مسؤول التوزيع.');
 
+class DuplicateNationalIdError extends Error {}
+
+export function isDuplicateNationalIdError(error) {
+  const constraint = /UNIQUE constraint failed: khatib_identity\.national_id_fingerprint\b/i;
+  return error instanceof DuplicateNationalIdError ||
+    constraint.test(error?.message || '') || constraint.test(error?.cause?.message || '');
+}
+
+async function prepareIdentityValues(db, secret, region, khatibId, nationalId) {
+  // Existing encrypted rows acquire a fingerprint when their ID is next saved.
+  const legacyRows = await all(db, 'SELECT khatib_id, national_id_ciphertext FROM khatib_identity WHERE national_id_fingerprint IS NULL AND national_id_ciphertext IS NOT NULL AND khatib_id <> ?', khatibId);
+  const legacyIds = await decryptNationalIds(legacyRows, secret, region);
+  if (Object.values(legacyIds).includes(nationalId)) throw new DuplicateNationalIdError();
+
+  const [encrypted, fingerprint] = await Promise.all([
+    identityKey(secret).then(key => encryptId(key, nationalId, region + ':' + khatibId)),
+    nationalIdFingerprint(secret, region, nationalId),
+  ]);
+  return { encrypted, fingerprint };
+}
+
 export async function prepareKhatibNationalId_(db, secret, region, khatibId, nationalId) {
-  const encrypted = await encryptId(await identityKey(secret), nationalId, region + ':' + khatibId);
+  const { encrypted, fingerprint } = await prepareIdentityValues(db, secret, region, khatibId, nationalId);
   return db.prepare(`
-    INSERT INTO khatib_identity (khatib_id, national_id_ciphertext)
-    SELECT id, ? FROM khatibs WHERE id = ?
-    ON CONFLICT(khatib_id) DO UPDATE SET national_id_ciphertext = excluded.national_id_ciphertext,
+    INSERT INTO khatib_identity (khatib_id, national_id_ciphertext, national_id_fingerprint)
+    SELECT id, ?, ? FROM khatibs WHERE id = ?
+    ON CONFLICT(khatib_id) DO UPDATE SET
+      national_id_ciphertext = CASE WHEN khatib_identity.national_id_fingerprint = excluded.national_id_fingerprint
+        THEN khatib_identity.national_id_ciphertext ELSE excluded.national_id_ciphertext END,
+      national_id_fingerprint = excluded.national_id_fingerprint,
       code_hash = NULL, code_phone = NULL, code_expires_at = NULL
-  `).bind(encrypted, khatibId);
+  `).bind(encrypted, fingerprint, khatibId);
 }
 
 export async function issueKhatibIdentityCode_(db, khatibId) {
@@ -69,12 +106,23 @@ export async function submitKhatibNationalId_(db, secret, region, b) {
   const criteria = `khatib_id = ? AND code_hash = ? AND code_phone = ? AND code_expires_at > ?
     AND EXISTS (SELECT 1 FROM khatibs WHERE id = khatib_id AND active = 1 AND phone = code_phone)`;
   if (!await one(db, 'SELECT 1 FROM khatib_identity WHERE ' + criteria, khatib.id, hash, khatib.phone, nowIso_())) return invalidCode();
-  const encrypted = await encryptId(await identityKey(secret), nationalId, region + ':' + khatib.id);
-  const result = await run(db, `
-    UPDATE khatib_identity SET national_id_ciphertext = ?, code_hash = NULL, code_phone = NULL, code_expires_at = NULL
-    WHERE ${criteria}
-  `, encrypted, khatib.id, hash, khatib.phone, nowIso_());
-  return result.meta.changes ? ok_({ saved: true }) : invalidCode();
+  try {
+    const { encrypted, fingerprint } = await prepareIdentityValues(db, secret, region, khatib.id, nationalId);
+    const result = await run(db, `
+      UPDATE khatib_identity SET
+        national_id_ciphertext = CASE WHEN national_id_fingerprint = ? THEN national_id_ciphertext ELSE ? END,
+        national_id_fingerprint = ?, code_hash = NULL, code_phone = NULL, code_expires_at = NULL
+      WHERE ${criteria}
+    `, fingerprint, encrypted, fingerprint, khatib.id, hash, khatib.phone, nowIso_());
+    return result.meta.changes ? ok_({ saved: true }) : invalidCode();
+  } catch (error) {
+    if (!isDuplicateNationalIdError(error)) throw error;
+    await run(db, `
+      UPDATE khatib_identity SET code_hash = NULL, code_phone = NULL, code_expires_at = NULL
+      WHERE ${criteria}
+    `, khatib.id, hash, khatib.phone, nowIso_());
+    return invalidCode();
+  }
 }
 
 export async function saveKhatibNationalId_(db, secret, region, b) {

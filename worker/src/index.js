@@ -21,7 +21,7 @@ import { getSettings_ } from './settings.js';
 import { one } from './db.js';
 import { canAccessRegion } from './regions.js';
 import { khatibLogin_, khatibWhoami_, khatibGetSchedule_, khatibRespond_ } from './khatib-portal.js';
-import { issueKhatibIdentityCode_, submitKhatibNationalId_, saveKhatibNationalId_, weeklyNationalIds_, khatibPrivateDetails_ } from './khatib-identity.js';
+import { issueKhatibIdentityCode_, submitKhatibNationalId_, saveKhatibNationalId_, weeklyNationalIds_, khatibPrivateDetails_, isDuplicateNationalIdError } from './khatib-identity.js';
 import {
   mosquePhoneCheck_, mosqueSetPassword_, mosqueLogin_, mosqueWhoami_, mosqueLogout_,
   mosqueGetSchedule_, mosqueRequestReset_, mosqueConfirmReset_, resetMosquePassword_, telegramWebhook_
@@ -143,7 +143,13 @@ export default {
           }
         }
 
-        const actionResult = await route_(body, env, request, db, region);
+        let actionResult;
+        try {
+          actionResult = await route_(body, env, request, db, region);
+        } catch (error) {
+          if (!isDuplicateNationalIdError(error)) throw error;
+          actionResult = err_('DUPLICATE', 'الرقم القومي ده مسجل بالفعل لخطيب تاني في نفس الإدارة.');
+        }
         if (region === 'tebeen' && actionResult.error) {
           actionResult.error.message = actionResult.error.message.replace(/المجاورة/g, 'المنطقة');
         }

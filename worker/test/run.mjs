@@ -1238,6 +1238,8 @@ function getNextFriday(now = new Date()) {
       const phoneSession = await api({ action: 'khatibLogin', phone });
       assert(phoneSession.ok, 'K001 can log in with a mobile number before enrollment');
       const enrollment = await api({ action: 'saveKhatibNationalId', token, khatibId: 'K001', nationalId });
+      const duplicateEnrollment = await api({ action: 'saveKhatibNationalId', token, khatibId: 'K002', nationalId });
+      assert(duplicateEnrollment.error?.code === 'DUPLICATE', 'D1 rejects a duplicate national ID');
       assert(enrollment.ok, 'coordinator saves K001 national ID');
       assert((await api({ action: 'khatibLogin', phone })).error?.code === 'NOT_FOUND', 'registered national ID blocks mobile login');
       assert((await api({ action: 'khatibWhoami', token: phoneSession.data.token })).error?.code === 'UNAUTHENTICATED', 'registration invalidates an active mobile session');

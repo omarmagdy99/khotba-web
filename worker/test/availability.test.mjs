@@ -528,17 +528,19 @@ test('CRUD - Omitted availability preserves stored rule on old client updates on
 });
 
 // ════════════════════════════════════════════════════════════════════
-// 10. Chained migrations 0005–0009 on a populated legacy database
+// 10. Chained migrations 0005–0010 on a populated legacy database
 // ════════════════════════════════════════════════════════════════════
 
-test('MIGRATION CHAIN: 0005–0009 preserve legacy rows and converge on the fresh schema', () => {
+test('MIGRATION CHAIN: 0005–0010 preserve legacy rows and converge on the fresh schema', () => {
   const legacySchema = getLegacySchema().split('-- 11. طلبات مراجعة الاعتذار')[0]
     .replace(/\r?\n\s*manager_phone TEXT,/, '')
     .replace(/,\r?\n\s*occupation TEXT[^\r\n]*/, '')
-    .replace(/CREATE TABLE IF NOT EXISTS khatib_identity \([\s\S]*?\r?\n\);/, '');
+    .replace(/CREATE TABLE IF NOT EXISTS khatib_identity \([\s\S]*?\r?\n\);/, '')
+    .replace(/CREATE UNIQUE INDEX IF NOT EXISTS idx_khatib_identity_fingerprint[\s\S]*?;/, '')
+    .replace(/CREATE TRIGGER IF NOT EXISTS require_khatib_identity_fingerprint_on_(?:insert|update)[\s\S]*?END;/g, '');
   const migrations = [
     '0005_excuse_requests.sql', '0006_khatib_availability.sql', '0007_mosque_portal.sql',
-    '0008_khatib_identity.sql', '0009_khatib_occupation.sql'
+    '0008_khatib_identity.sql', '0009_khatib_occupation.sql', '0010_unique_khatib_national_id.sql'
   ]
     .map((f) => fs.readFileSync(path.join(rootDir, 'worker/migrations', f), 'utf8'));
   const dataTables = ['users', 'mosques', 'preferences', 'assignments', 'settings', 'khatib_readiness'];
@@ -587,6 +589,19 @@ test('MIGRATION CHAIN: 0005–0009 preserve legacy rows and converge on the fres
     }
     assert.equal(db.prepare('SELECT COUNT(*) AS c FROM excuse_requests').get().c, 0);
     assert.equal(db.prepare('SELECT COUNT(*) AS c FROM khatib_identity').get().c, 0);
+    const indexes = db.prepare('PRAGMA index_list(khatib_identity)').all();
+    assert.equal(indexes.find(index => index.name === 'idx_khatib_identity_fingerprint')?.unique, 1);
+    db.exec(`
+      INSERT INTO khatib_identity (khatib_id, national_id_ciphertext, national_id_fingerprint)
+      VALUES ('K1', 'old ciphertext', 'indexed fingerprint');
+    `);
+    assert.throws(() => db.exec("UPDATE khatib_identity SET national_id_ciphertext = 'legacy writer ciphertext' WHERE khatib_id = 'K1'"),
+      /National ID writes require a matching fingerprint/);
+    assert.throws(() => db.exec("INSERT INTO khatib_identity (khatib_id, national_id_ciphertext) VALUES ('K2','legacy writer ciphertext')"),
+      /National ID writes require a fingerprint/);
+    db.exec("INSERT INTO khatib_identity (khatib_id, code_hash) VALUES ('K2','code only')");
+    assert.throws(() => db.exec("UPDATE khatib_identity SET national_id_ciphertext = 'legacy writer ciphertext' WHERE khatib_id = 'K2'"),
+      /National ID writes require a matching fingerprint/);
 
     // Migrated structure must match a fresh install of schema.sql
     const fresh = new DatabaseSync(':memory:');

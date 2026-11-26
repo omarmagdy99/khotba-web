@@ -100,9 +100,28 @@ assert.equal((await api('khatibWhoami',nationalSessionK1)).data.khatib.id,'K1');
 assert.equal((await api('khatibWhoami',nationalSessionK1,{},'tebeen')).error.code,'UNAUTHENTICATED');
 assert.equal((await login({nationalId:id},'tebeen')).error.code,'NOT_FOUND');
 assert.equal((await login({phone:'01000000001'},'tebeen')).data.khatib.id,'K1');
-assert.equal((await api('saveKhatibNationalId','coordinator',{khatibId:'K2',nationalId:id})).ok,true);
-assert.equal((await api('khatibWhoami',phoneSessionK2)).error.code,'UNAUTHENTICATED');
-assert.equal((await login({nationalId:id})).error.code,'NOT_FOUND','ambiguous identity cannot sign in');
+const saveId = (khatibId, nationalId, region = '15may') =>
+  api('saveKhatibNationalId', 'admin', { khatibId, nationalId }, region);
+assert.equal((await saveId('K2', id)).error.code, 'DUPLICATE');
+assert.equal((await api('khatibWhoami', phoneSessionK2)).data.khatib.id, 'K2');
+assert.equal((await saveId('K1', arabicDigits)).ok, true, 'the owner can re-save the same ID');
+const currentIdentity = env.DB.sql.prepare("SELECT * FROM khatib_identity WHERE khatib_id = 'K1'").get();
+assert.equal(currentIdentity.national_id_ciphertext, saved.national_id_ciphertext);
+assert.ok(currentIdentity.national_id_fingerprint);
+env.DB.sql.exec("UPDATE khatibs SET active = 0 WHERE id = 'K1'");
+env.DB.sql.exec("UPDATE khatib_identity SET national_id_fingerprint = NULL WHERE khatib_id = 'K1'");
+assert.equal((await saveId('K2', id)).error.code, 'DUPLICATE', 'legacy IDs on inactive records remain reserved');
+env.DB.sql.exec("UPDATE khatibs SET active = 1 WHERE id = 'K1'");
+const issueK2 = async () => (await api('issueKhatibIdentityCode', 'coordinator', { khatibId: 'K2' })).data.code;
+const invalidCodeResponse = await submit(phoneSessionK2, '0'.repeat(24), id);
+const legacyCode = await issueK2();
+assert.deepEqual(await submit(phoneSessionK2, legacyCode, id), invalidCodeResponse);
+assert.deepEqual(await submit(phoneSessionK2, legacyCode, '20000000000003'), invalidCodeResponse);
+assert.equal((await saveId('K1', id)).ok, true);
+const indexedCode = await issueK2();
+assert.deepEqual(await submit(phoneSessionK2, indexedCode, id), invalidCodeResponse);
+assert.deepEqual(await submit(phoneSessionK2, indexedCode, '20000000000003'), invalidCodeResponse);
+assert.equal((await login({ nationalId: id })).data.khatib.id, 'K1');
 assert.deepEqual((await api('weeklyNationalIds','coordinator',{date})).data.nationalIds,{K1:id});
 assert.deepEqual((await api('weeklyNationalIds','admin',{date},'tebeen')).data.nationalIds,{});
 assert.deepEqual((await api('weeklyNationalIds','admin',{date:'2099-01-09'})).data.nationalIds,{});
@@ -118,7 +137,9 @@ const details = { name: 'New preacher', phone: '01000000003', nationalId: arabic
 assert.equal((await api('createKhatib','viewer',details)).error.code,'FORBIDDEN');
 assert.equal((await api('createKhatib','coordinator',{...details,nationalId:'123'})).error.code,'BAD_REQUEST');
 assert.equal(env.DB.sql.prepare('SELECT id FROM khatibs WHERE name = ?').get(details.name), undefined);
-const added = (await api('createKhatib','coordinator',details)).data.id;
+assert.equal((await api('createKhatib', 'coordinator', details)).error.code, 'DUPLICATE');
+assert.equal(env.DB.sql.prepare('SELECT id FROM khatibs WHERE name = ?').get(details.name), undefined);
+const added = (await api('createKhatib', 'coordinator', { ...details, nationalId: '20000000000001' })).data.id;
 async function readOccupation() {
   const { data } = await api('listKhatibs','coordinator');
   return data.khatibs.find(k => k.id === added).occupation;
@@ -128,6 +149,10 @@ const stored = () => env.DB.sql.prepare('SELECT national_id_ciphertext FROM khat
 assert.ok(stored());
 assert.notEqual(stored(),id);
 const beforeEdit = stored();
+const conflictingEdit = { ...details, id: added, name: 'Rejected name', nationalId: id };
+assert.equal((await api('updateKhatib', 'coordinator', conflictingEdit)).error.code, 'DUPLICATE');
+assert.equal(stored(), beforeEdit);
+assert.equal(env.DB.sql.prepare('SELECT name FROM khatibs WHERE id = ?').get(added).name, details.name);
 assert.equal((await api('updateKhatib','coordinator',{...details,id:added,nationalId:''})).ok,true);
 assert.equal(stored(),beforeEdit);
 assert.equal((await api('updateKhatib','coordinator',{...details,id:added,nationalId:'20000000000002'})).ok,true);
@@ -150,4 +175,12 @@ assert.equal((await api('updateKhatib','coordinator',{...oldClientDetails,occupa
 assert.equal(await readOccupation(),'');
 env.DB.sql.prepare("UPDATE assignments SET khatib_id = ? WHERE id = 'A1'").run(added);
 assert.deepEqual((await api('weeklyNationalIds','coordinator',{date})).data.nationalIds,{[added]:'20000000000002'});
-console.log('PASS: conditional login, phone session invalidation, one-time code, encryption, private exports, region and role authorization');
+assert.equal((await saveId('K1', id, 'tebeen')).ok, true, 'the same ID can be used in a separate region');
+const simultaneousId = '20000000000004';
+const competingSaves = await Promise.all([saveId('K2', simultaneousId), saveId(added, simultaneousId)]);
+assert.equal(competingSaves.filter(result => result.ok).length, 1);
+assert.equal(competingSaves.filter(result => result.error?.code === 'DUPLICATE').length, 1);
+const { data: { nationalIds } } = await api('getKhatibPrivateDetails', 'coordinator');
+assert.deepEqual(Object.keys(nationalIds).filter(khatibId => nationalIds[khatibId] === simultaneousId),
+  [competingSaves[0].ok ? 'K2' : added]);
+console.log('PASS: conditional login, one-time codes, encryption, unique national IDs, private exports, and authorization');
